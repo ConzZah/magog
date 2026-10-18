@@ -1,6 +1,6 @@
 #!/usr/bin/env sh
 
-### /// magog.sh // ConzZah // 2026-10-18 05:50 ///
+### /// magog.sh // ConzZah // 2026-10-18 07:15 ///
 
 ## depcheck
 deps="firefox curl grep sed cut fzf tr wc"
@@ -10,7 +10,7 @@ for dep in $deps; do
 done
 
 ## if $missing_deps is empty, tell the user which are missing & exit.
-[ -z "$missing_deps" ] && printf '\n%s\n\n' "--> MISSING DEPS: $missing_deps"
+[ -n "$missing_deps" ] && printf '\n%s\n\n' "--> MISSING DEPS: $missing_deps" && exit 1
 
 
 init () {
@@ -64,8 +64,8 @@ chosen_game="$(printf '%s\n' "$game"| cut -d '~' -f 2| fzf --header "--> CHOOSE 
 ## if $chosen_game was empty, then no game was chosen (shocker, i know..)
 [ -z "$chosen_game" ] && printf '\n%s\n\n' "--> NO GAME CHOSEN." && exit 1
 
-## if $chosen_game is NOT empty, get the full index line
-[ -n "$chosen_game" ] && game="$(printf '%s\n' "$game" |grep -m1 "$chosen_game")"
+## if $chosen_game is NOT empty, get the full index line(s)
+[ -n "$chosen_game" ] && game="$(printf '%s\n' "$game" |grep "$chosen_game")"
 }
 
 ## get game name
@@ -108,7 +108,7 @@ done
 get_cdn_link () {
 ## fetch cdn-link for the $part in question
 ## NOTE: with every iteration, new cookies will be set, so we never need to worry about expiry,
-## UNLESS the user doesn't request a game within 9 months or terminates the session
+## UNLESS the user doesn't request a game within 9 months or terminates the session (via web in this case)
 sleep 0.5
 curl -sLIb "$HOME/.magog/.gog-cookie.txt" -c "$HOME/.magog/.new_gog-cookie.txt" "https://www.gog.com/downloads/$part"| \
 grep 'location'| grep -o 'https.*' >> "$HOME/.magog/cdn_links.txt"
@@ -134,8 +134,8 @@ rm -f "$HOME/.magog/index.txt" >/dev/null
 
 ## get gog cookie
 ## if ce.sh isn't available, get it
-[ ! -f "ce.sh" ] && curl -sLo "https://github.com/ConzZah/ce/raw/refs/heads/main/ce.sh"
-[ -f "ce.sh" ] && sh "ce.sh" | grep -E 'gog_.*|gog-.*' > "$HOME/.magog/.gog-cookie.txt" || exit 1
+[ ! -f "$HOME/.magog/ce.sh" ] && curl -sLo "$HOME/.magog/ce.sh" "https://github.com/ConzZah/ce/raw/refs/heads/main/ce.sh"
+[ -f "$HOME/.magog/ce.sh" ] && sh "$HOME/.magog/ce.sh" | grep -E 'gog_.*|gog-.*' > "$HOME/.magog/.gog-cookie.txt" || exit 1
 
 ## if 'gog-al' doesn't appear within '.gog-cookie.txt' then we're not logged in and need to abort.
 ! grep -q 'gog-al' "$HOME/.magog/.gog-cookie.txt" && printf '\n%s\n\n' "--> NOT LOGGED IN, LOGIN TO ANY GOG ACCOUNT IN FIREFOX AND TRY AGAIN." && exit 1
@@ -189,7 +189,7 @@ part_list_patches="$(printf '%s\n' "$part_list_complete"| grep -o '.*en1patch.*'
 ## INDEX MAP: 1 = $game_id ~ 2 = $game_title ~ 3 = $game_link ~ 4 = $part_list_basegame ~ 5 = $part_list_dlc ~ 6 = $part_list_patches
 entry="$game_id~$game_title~$game_link~$part_list_basegame~$part_list_dlc~$part_list_patches"
 
-## otherwise write to '$HOME/.magog/index.txt'
+## write $entry to '$HOME/.magog/index.txt'
 printf '%s\n' "$entry" >> "$HOME/.magog/index.txt"
 
 ## init vars before next iteration jus to be safe lol
@@ -212,6 +212,16 @@ sed -i -e 's#u0026##g' -e 's#u0027##g' -e 's#u2013##g' -e 's#u2019##g' -e 's#u21
 printf '\n%s\n\n' "--> LINE-COUNT OF '$HOME/.magog/index.txt' DOESN'T MATCH: '$gc'" && exit 1
 }
 
+
+### PRE-LAUNCH ###
+## process arguments
+while [ "$#" = "1" ]; do
+case $1 in
+## force a (re)index of the users gog-library
+'-index'|'-INDEX'|'-i') gog_library_indexer; exit ;;
+*) ;;
+esac
+done
 
 ### LAUNCH ###
 init "$@"
