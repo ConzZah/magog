@@ -1,6 +1,6 @@
 #!/usr/bin/env sh
 
-### /// magog.sh // ConzZah // 2026-10-18 07:15 ///
+### /// magog.sh // ConzZah // 2026-10-18 07:25 ///
 
 ## depcheck
 deps="firefox curl grep sed cut fzf tr wc"
@@ -208,7 +208,7 @@ done
 sed -i -e 's#u0026##g' -e 's#u0027##g' -e 's#u2013##g' -e 's#u2019##g' -e 's#u2122##g' -e 's#u00ae##g' -e 's#u003C##g' -e 's#u003E##g' -e 's#u014d##g' "$HOME/.magog/index.txt"
 
 ## check if we actually have all entries
-[ "$(wc -l "$HOME/.magog/index.txt")" != "$gc" ] && \
+[ "$(wc -l "$HOME/.magog/index.txt"| cut -d ' ' -f 1)" != "$gc" ] && \
 printf '\n%s\n\n' "--> LINE-COUNT OF '$HOME/.magog/index.txt' DOESN'T MATCH: '$gc'" && exit 1
 }
 
