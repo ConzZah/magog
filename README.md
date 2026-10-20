@@ -12,8 +12,6 @@ Magog will use your GOG Cookies from Firefox to Generate/Access CDN-Links for yo
 On first Launch, make sure you're logged in to your GOG Account on Firefox.
 It will check all your games, dlc's and patches, and then add them to a list.
 
-a notable caveat to this approach (which i realize) is, that you have to re-index your whole gog-library whenever a new update drops.
-
 ## REGARDING PRIVACY:
 
 Your Cookies **NEVER** leave your Device
