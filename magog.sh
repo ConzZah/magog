@@ -1,6 +1,6 @@
 #!/usr/bin/env sh
 
-### /// magog.sh // ConzZah // 2026-10-21 00:15 ///
+### /// magog.sh // ConzZah // 2026-10-21 00:57 ///
 
 ## depcheck
 deps="firefox curl grep sed cut fzf tr wc"
@@ -89,7 +89,16 @@ game_link="$(printf '%s\n' "$game"| cut -d '~' -f 3)"
 printf '\n%s\n\n' "GAME: $gname_hr" > "$HOME/.magog/cdn_links.txt"
 
 ## get game details from ${game_id}.json
-game="$(curl -sb "$HOME/.magog/.gog-cookie.txt" "https://www.gog.com/en/account/gameDetails/${game_id}.json" --compressed| sed 's#\\##g'| tr ',' '\n')"
+get_game_id_json () { game="$(curl -sb "$HOME/.magog/.gog-cookie.txt" "https://www.gog.com/en/account/gameDetails/${game_id}.json" --compressed| sed 's#\\##g'| tr ',' '\n')" ;}
+get_game_id_json
+
+## if $game contains the phrase 'openlogin', 
+## then your gog cookie is no longer valid.
+## magog will try to fetch another one, before trying again.
+printf '%s\n' "$game"| grep 'openlogin' && {
+rm -f "$HOME/.magog/.gog-cookie.txt"
+get_gog_cookie && get_game_id_json || exit 1
+}
 
 ## get part numbers of basegame, dlc & patches, while omitting the easy-installers
 ## INDEX MAP: 1 = $part_list_basegame ~ 2 = $part_list_dlc ~ 3 = $part_list_patches ( DELIM: '~' )
@@ -157,7 +166,7 @@ cat "$HOME/.magog/cdn_links.txt"
 }
 
 
-gog_library_indexer () {
+get_gog_cookie () {
 ## get gog cookie, if it doesn't exist already.
 [ ! -f "$HOME/.magog/.gog-cookie.txt" ] && {
 ## if ce.sh isn't available, get it
@@ -167,14 +176,22 @@ gog_library_indexer () {
 
 ## if 'gog-al' doesn't appear within '.gog-cookie.txt' then we're not logged in and need to abort.
 ! grep -q 'gog-al' "$HOME/.magog/.gog-cookie.txt" && printf '\n%s\n\n' "--> NOT LOGGED IN, LOGIN TO ANY GOG ACCOUNT IN FIREFOX AND TRY AGAIN." && \
-rm -f "$HOME/.magog/.gog-cookie.txt" && exit 1
+{ rm -f "$HOME/.magog/.gog-cookie.txt"; exit 1 ;}
 
+## if we're still running, return 0
+return 0
+}
+
+
+gog_library_indexer () {
+get_gog_cookie
 ## obtain index of game id's and format them for processing
 index="$(curl -sb "$HOME/.magog/.gog-cookie.txt" 'https://menu.gog.com/v1/account/licences' --compressed)"
 
-## if $index contains '504 Gateway Time-out', abort.
-printf '%s\n' "$index"| grep -q '504 Gateway Time-out' && \
-printf '%s\n' "--> 	ERROR: 504, TRY AGAIN LATER." && exit 1
+## if $index contains 'Unable to authenticate', abort.
+printf '%s\n' "$index"| grep -q 'Unable to authenticate' && \
+printf '%s\n' "--> 	ERROR: 'Unable to authenticate'" && \
+{ rm -f "$HOME/.magog/.gog-cookie.txt"; exit 1 ;}
 
 ## convert the output into a newline seperated list,
 ## so we can use it in the for loop 
@@ -184,8 +201,9 @@ index="$(printf '%s\n' "$index"| tr '[]",' ' '| tr -s ' '| tr ' ' '\n')"
 gc="$(curl -sb "$HOME/.magog/.gog-cookie.txt" 'https://menu.gog.com/v1/account/stats'| \
 tr ',' '\n'| grep -o 'games.*'| cut -d ':' -f 2)"
 
-## if $gc is 0, then you don't have any games.
-[ "$gc" = "0" ] && printf '\n%s\n\n' "--> THERE ARE NO GAMES ON THIS GOG ACCOUNT." && exit 1
+## if $gc is 0 or unset, then you don't have any games, or magog can't determine how many
+[ "$gc" = "0" ] || [ -z "$gc" ] && printf '\n%s\n\n' "--> CAN'T GET NUMBER OF GAMES ON THIS GOG ACCOUNT." && \
+{ rm -f "$HOME/.magog/.gog-cookie.txt"; exit 1 ;}
 
 ## show the user how many games they have
 printf '\n%s\n\n' "--> GAMES ON THIS GOG ACCOUNT: $gc"
