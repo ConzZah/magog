@@ -1,6 +1,6 @@
 #!/usr/bin/env sh
 
-### /// magog.sh // ConzZah // 2026-10-22 02:50 ///
+### /// magog.sh // ConzZah // 2026-10-22 07:33 ///
 
 ## depcheck
 deps="firefox curl grep sed cut fzf tr wc"
@@ -35,11 +35,12 @@ check_if_game_exists_in_index
 
 ## if we have more than one line in $game,
 ## launch fzf so the user can choose one of them.
-## NOTE: it means there are multiple possible matches,
-##  this edge case may happen when the user provides a game name as argument and has games with similar names.
+## NOTE: it means there are multiple possible matches, and we set $pick_first_game.
+##  this edge case WILL happen when the user provides a game name as argument and has games with similar names.
 [ "$(printf '%s\n' "$game"| wc -l)"  -gt "1" ] && {
+pick_first_game="1"
 chosen_game=""
-chosen_game="$(printf '%s\n' "$game"| cut -d '~' -f 2| fzf --header "--> CHOOSE A GAME")" 
+chosen_game="$(printf '%s\n' "$game"| cut -d '~' -f 2| fzf --header "--> CHOOSE A GAME")"
 check_if_user_chose_a_game_with_fzf
 check_if_game_exists_in_index
 }
@@ -74,6 +75,17 @@ check_if_game_exists_in_index () {
 ## (this will also get us the full index.txt line, we'll need it for $game_id later)
 ! game="$(grep -i "$game" "$HOME/.magog/index.txt")" && \
 printf '\n%s\n\n' "--> ERROR: GAME: '$game' IS NOT IN INDEX" && exit 1
+
+## if $pick_first_game is nonzero, print only the first line in $game.
+[ -n "$pick_first_game" ] && game="$(printf '%s\n' "$game"| sed -n '1 p')"
+}
+
+
+get_game_id_json () {
+## get game details (${game_id}.json)
+game="$(curl -sb "$HOME/.magog/.gog-cookie.txt" -c "$HOME/.magog/.new_gog-cookie.txt" "https://www.gog.com/en/account/gameDetails/${game_id}.json" --compressed| sed 's#\\##g'| tr ',' '\n')"
+## refresh gog cookie
+refresh_gog_cookie
 }
 
 
@@ -85,13 +97,15 @@ gname_hr="$(printf '%s\n' "$game"| cut -d '~' -f 2)"
 ## get the $game_link (so we can tell dlc from basegame)
 game_link="$(printf '%s\n' "$game"| cut -d '~' -f 3)"
 
-## get game details from ${game_id}.json
-get_game_id_json () { game="$(curl -sb "$HOME/.magog/.gog-cookie.txt" "https://www.gog.com/en/account/gameDetails/${game_id}.json" --compressed| sed 's#\\##g'| tr ',' '\n')" ;}
+## tell the user to not be impatient
+printf '\n%s\n\n' "--> GENERATING CDN-LINKS FOR: '$gname_hr' PLEASE WAIT.."
+
+## get game details
 get_game_id_json
 
 ## if $game contains the phrase 'openlogin', 
 ## then your gog cookie is no longer valid.
-## magog will try to fetch another one, before trying again.
+## magog will try to fetch another one via firefox, before trying again.
 printf '%s\n' "$game"| grep -q 'openlogin' && {
 rm -f "$HOME/.magog/.gog-cookie.txt"
 get_gog_cookie && get_game_id_json || exit 1
@@ -106,42 +120,39 @@ gparts_patches="$(printf '%s\n' "$part_list_complete"| grep -o '.*en1patch.*')"
 ## get current game version
 version_basegame="$(printf '%s\n' "$game"|grep -m1 '"version":' | cut -d '"' -f 4)"
 
-## tell the user to not be impatient
-printf '\n%s\n\n' "--> GENERATING CDN-LINKS FOR: '$gname_hr' PLEASE WAIT.."
-
 ## write game name & game version to cdn_links.txt
 printf '\n%s\n\n' "GAME: $gname_hr // VERSION: $version_basegame" > "$HOME/.magog/cdn_links.txt"
 
 ## get the cdn links for the individual parts ##
 
-### basegame ### 
-printf '\n%s\n%s\n%s\n\n' "============" " BASE GAME:" "============" >> "$HOME/.magog/cdn_links.txt"
+### basegame ###
+printf '\n%s\n%s\n%s\n\n' "============" " BASE GAME:" "============"| tee -a "$HOME/.magog/cdn_links.txt"
 
 ## count number of parts and print the part number before the cdn-link
 pc="1" ## <-- part-counter
 tc="$(printf '%s\n' "$gparts_basegame"| wc -l)" ## <-- total-count
 for part in $gparts_basegame; do
-printf '%s\n' "(Part $pc of $tc)" >> "$HOME/.magog/cdn_links.txt"
+printf '%s\n' "(Part $pc of $tc)"| tee -a "$HOME/.magog/cdn_links.txt"
 get_cdn_link
 pc="$((pc + 1))"
 done
 
 ### dlc ###
 [ -n "$gparts_dlc" ] && {
-printf '\n\n%s\n%s\n%s\n\n' "======" " DLC:" "======" >> "$HOME/.magog/cdn_links.txt"
+printf '\n\n%s\n%s\n%s\n\n' "======" " DLC:" "======"| tee -a "$HOME/.magog/cdn_links.txt"
 for part in $gparts_dlc; do
 ## get dlc title
-printf '%s\n' "$game"| grep -B8 "$part"| grep -o -m1 '"title":.*'| cut -d '"' -f 4 >> "$HOME/.magog/cdn_links.txt"
+printf '%s\n' "$game"| grep -B8 "$part"| grep -o -m1 '"title":.*'| cut -d '"' -f 4| tee -a "$HOME/.magog/cdn_links.txt"
 get_cdn_link
 done
 }
 
 ### patches ###
 [ -n "$gparts_patches" ] && {
-printf '\n\n%s\n%s\n%s\n\n' "==========" " PATCHES:" "==========" >> "$HOME/.magog/cdn_links.txt"
+printf '\n\n%s\n%s\n%s\n\n' "==========" " PATCHES:" "=========="| tee -a "$HOME/.magog/cdn_links.txt"
 for part in $gparts_patches; do
 ## get patch name
-printf '%s\n' "$game"| grep -A1 "$part"| grep -o '"name":.*'| cut -d '"' -f 4 >> "$HOME/.magog/cdn_links.txt"
+printf '%s\n' "$game"| grep -A1 "$part"| grep -o '"name":.*'| cut -d '"' -f 4| tee -a "$HOME/.magog/cdn_links.txt"
 get_cdn_link
 done
 }
@@ -165,7 +176,10 @@ printf '\n' >> "$HOME/.magog/cdn_links.txt"
 
 
 display_cdn_links () {
-## display the result 
+## NOTE: if we used set -x, don't clear the screen, so debugging is still possible
+! printf '%s\n' "$-"| grep -q "x" && clear
+## display the result
+printf '\n%s\n\n' "--> DONE"
 cat "$HOME/.magog/cdn_links.txt"
 }
 
@@ -186,10 +200,14 @@ get_gog_cookie () {
 return 0
 }
 
+
 refresh_gog_cookie () {
 ## make sure that '.new_gog-cookie.txt' becomes our current cookie
+## NOTE: '.new_gog-cookie.txt' will be created by: get_game_id_json & get_cdn_link
+[ -f "$HOME/.magog/.new_gog-cookie.txt" ] && { 
 cat "$HOME/.magog/.new_gog-cookie.txt" > "$HOME/.magog/.gog-cookie.txt"
 rm -f "$HOME/.magog/.new_gog-cookie.txt"
+}
 }
 
 
@@ -232,10 +250,7 @@ printf '%s\n' "--> [${cg} // ${gc}]"
 ! grep -q "$game_id" "$HOME/.magog/index.txt" && {
 
 ## get game details
-game="$(curl -sb "$HOME/.magog/.gog-cookie.txt" -c "$HOME/.magog/.new_gog-cookie.txt" "https://www.gog.com/en/account/gameDetails/${game_id}.json" --compressed| sed 's#\\##g'| tr ',' '\n')"
-
-## refresh gog cookie
-refresh_gog_cookie
+get_game_id_json
 
 ## get game title
 game_title="$(printf '%s\n' "$game"| grep -m1 'title'| cut -d '"' -f 4| sed 's#,##g')"
