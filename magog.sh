@@ -1,6 +1,6 @@
 #!/usr/bin/env sh
 
-### /// magog.sh // ConzZah // 2026-10-21 00:57 ///
+### /// magog.sh // ConzZah // 2026-10-22 02:50 ///
 
 ## depcheck
 deps="firefox curl grep sed cut fzf tr wc"
@@ -85,9 +85,6 @@ gname_hr="$(printf '%s\n' "$game"| cut -d '~' -f 2)"
 ## get the $game_link (so we can tell dlc from basegame)
 game_link="$(printf '%s\n' "$game"| cut -d '~' -f 3)"
 
-## prepare cdn_links.txt
-printf '\n%s\n\n' "GAME: $gname_hr" > "$HOME/.magog/cdn_links.txt"
-
 ## get game details from ${game_id}.json
 get_game_id_json () { game="$(curl -sb "$HOME/.magog/.gog-cookie.txt" "https://www.gog.com/en/account/gameDetails/${game_id}.json" --compressed| sed 's#\\##g'| tr ',' '\n')" ;}
 get_game_id_json
@@ -95,48 +92,56 @@ get_game_id_json
 ## if $game contains the phrase 'openlogin', 
 ## then your gog cookie is no longer valid.
 ## magog will try to fetch another one, before trying again.
-printf '%s\n' "$game"| grep 'openlogin' && {
+printf '%s\n' "$game"| grep -q 'openlogin' && {
 rm -f "$HOME/.magog/.gog-cookie.txt"
 get_gog_cookie && get_game_id_json || exit 1
 }
 
-## get part numbers of basegame, dlc & patches, while omitting the easy-installers
-## INDEX MAP: 1 = $part_list_basegame ~ 2 = $part_list_dlc ~ 3 = $part_list_patches ( DELIM: '~' )
+## get part numbers of basegame, dlc & patches, (including their version number), while omitting the easy-installers
 part_list_complete="$(printf '%s\n' "$game"| grep -o '/downloads/.*'| sed -e 's#"##g' -e 's#/downloads/##g' -e's#,$##g' -e '$d')"
-part_list_basegame="$(printf '%s\n' "$part_list_complete"| grep "${game_link}/en1installer.*"| tr '\n' ','| sed 's#,$##g')"
-part_list_dlc="$(printf '%s\n' "$part_list_complete"| grep -v "${game_link}/en1installer.*"| grep -o '.*en1installer.*'| tr '\n' ','| sed 's#,$##g')"
-part_list_patches="$(printf '%s\n' "$part_list_complete"| grep -o '.*en1patch.*'| tr '\n' ','| sed 's#,$##g')"
+gparts_basegame="$(printf '%s\n' "$part_list_complete"| grep "${game_link}/en1installer.*")"
+gparts_dlc="$(printf '%s\n' "$part_list_complete"| grep -v "${game_link}/en1installer.*"| grep -o '.*en1installer.*')"
+gparts_patches="$(printf '%s\n' "$part_list_complete"| grep -o '.*en1patch.*')"
 
-## put them all in a list
-game="${part_list_basegame}~${part_list_dlc}~${part_list_patches}"
-
-## get the part numbers
-gparts_basegame="$(printf '%s\n' "$game"| cut -d '~' -f 1| tr ',' '\n')"
-gparts_dlc="$(printf '%s\n' "$game"| cut -d '~' -f 2| tr ',' '\n')"
-gparts_patches="$(printf '%s\n' "$game"| cut -d '~' -f 3| tr ',' '\n')"
+## get current game version
+version_basegame="$(printf '%s\n' "$game"|grep -m1 '"version":' | cut -d '"' -f 4)"
 
 ## tell the user to not be impatient
 printf '\n%s\n\n' "--> GENERATING CDN-LINKS FOR: '$gname_hr' PLEASE WAIT.."
 
-## get the cdn links for the individual parts
-## basegame
+## write game name & game version to cdn_links.txt
+printf '\n%s\n\n' "GAME: $gname_hr // VERSION: $version_basegame" > "$HOME/.magog/cdn_links.txt"
+
+## get the cdn links for the individual parts ##
+
+### basegame ### 
 printf '\n%s\n%s\n%s\n\n' "============" " BASE GAME:" "============" >> "$HOME/.magog/cdn_links.txt"
+
+## count number of parts and print the part number before the cdn-link
+pc="1" ## <-- part-counter
+tc="$(printf '%s\n' "$gparts_basegame"| wc -l)" ## <-- total-count
 for part in $gparts_basegame; do
+printf '%s\n' "(Part $pc of $tc)" >> "$HOME/.magog/cdn_links.txt"
 get_cdn_link
+pc="$((pc + 1))"
 done
 
-## dlc
+### dlc ###
 [ -n "$gparts_dlc" ] && {
 printf '\n\n%s\n%s\n%s\n\n' "======" " DLC:" "======" >> "$HOME/.magog/cdn_links.txt"
 for part in $gparts_dlc; do
+## get dlc title
+printf '%s\n' "$game"| grep -B8 "$part"| grep -o -m1 '"title":.*'| cut -d '"' -f 4 >> "$HOME/.magog/cdn_links.txt"
 get_cdn_link
 done
 }
 
-## patches
+### patches ###
 [ -n "$gparts_patches" ] && {
 printf '\n\n%s\n%s\n%s\n\n' "==========" " PATCHES:" "==========" >> "$HOME/.magog/cdn_links.txt"
 for part in $gparts_patches; do
+## get patch name
+printf '%s\n' "$game"| grep -A1 "$part"| grep -o '"name":.*'| cut -d '"' -f 4 >> "$HOME/.magog/cdn_links.txt"
 get_cdn_link
 done
 }
@@ -147,15 +152,14 @@ get_cdn_link () {
 ## fetch cdn-link for the $part in question
 ## NOTE: with every iteration, new cookies will be set, so we never need to worry about expiry,
 ## UNLESS the user doesn't request a game within 9 months or terminates the session (via web in this case)
-sleep 0.5
+sleep 0.4
 curl -sLIb "$HOME/.magog/.gog-cookie.txt" -c "$HOME/.magog/.new_gog-cookie.txt" "https://www.gog.com/downloads/$part"| \
 grep 'location'| grep -o 'https.*' >> "$HOME/.magog/cdn_links.txt"
 
-## make sure that the new cookie becomes our current cookie
-cat "$HOME/.magog/.new_gog-cookie.txt" > "$HOME/.magog/.gog-cookie.txt"
-rm -f "$HOME/.magog/.new_gog-cookie.txt"
+## refresh gog cookie
+refresh_gog_cookie
 
-## print newline (mandatory)
+## print newline between links
 printf '\n' >> "$HOME/.magog/cdn_links.txt"
 }
 
@@ -180,6 +184,12 @@ get_gog_cookie () {
 
 ## if we're still running, return 0
 return 0
+}
+
+refresh_gog_cookie () {
+## make sure that '.new_gog-cookie.txt' becomes our current cookie
+cat "$HOME/.magog/.new_gog-cookie.txt" > "$HOME/.magog/.gog-cookie.txt"
+rm -f "$HOME/.magog/.new_gog-cookie.txt"
 }
 
 
@@ -222,7 +232,10 @@ printf '%s\n' "--> [${cg} // ${gc}]"
 ! grep -q "$game_id" "$HOME/.magog/index.txt" && {
 
 ## get game details
-game="$(curl -sb "$HOME/.magog/.gog-cookie.txt" "https://www.gog.com/en/account/gameDetails/${game_id}.json" --compressed| sed 's#\\##g'| tr ',' '\n')"
+game="$(curl -sb "$HOME/.magog/.gog-cookie.txt" -c "$HOME/.magog/.new_gog-cookie.txt" "https://www.gog.com/en/account/gameDetails/${game_id}.json" --compressed| sed 's#\\##g'| tr ',' '\n')"
+
+## refresh gog cookie
+refresh_gog_cookie
 
 ## get game title
 game_title="$(printf '%s\n' "$game"| grep -m1 'title'| cut -d '"' -f 4| sed 's#,##g')"
@@ -252,10 +265,6 @@ done
 
 ## get rid of (the most common) unicode chars after the loop so we don't have to do it every iteration
 sed -i -e 's#u0026##g' -e 's#u0027##g' -e 's#u2013##g' -e 's#u2019##g' -e 's#u2122##g' -e 's#u00ae##g' -e 's#u003C##g' -e 's#u003E##g' -e 's#u014d##g' "$HOME/.magog/index.txt"
-
-## check if we actually have all entries
-[ "$(wc -l "$HOME/.magog/index.txt"| cut -d ' ' -f 1)" != "$gc" ] && \
-printf '\n%s\n\n' "--> LINE-COUNT OF '$HOME/.magog/index.txt' DOESN'T MATCH: '$gc'" && exit 1
 }
 
 
