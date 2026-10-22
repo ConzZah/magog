@@ -1,6 +1,6 @@
 #!/usr/bin/env sh
 
-### /// magog.sh // ConzZah // 2026-10-22 07:33 ///
+### /// magog.sh // ConzZah // 2026-10-22 22:52 ///
 
 ## depcheck
 deps="firefox curl grep sed cut fzf tr wc"
@@ -127,22 +127,16 @@ printf '\n%s\n\n' "GAME: $gname_hr // VERSION: $version_basegame" > "$HOME/.mago
 
 ### basegame ###
 printf '\n%s\n%s\n%s\n\n' "============" " BASE GAME:" "============"| tee -a "$HOME/.magog/cdn_links.txt"
-
-## count number of parts and print the part number before the cdn-link
-pc="1" ## <-- part-counter
-tc="$(printf '%s\n' "$gparts_basegame"| wc -l)" ## <-- total-count
 for part in $gparts_basegame; do
-printf '%s\n' "(Part $pc of $tc)"| tee -a "$HOME/.magog/cdn_links.txt"
+get_part_name
 get_cdn_link
-pc="$((pc + 1))"
 done
 
 ### dlc ###
 [ -n "$gparts_dlc" ] && {
 printf '\n\n%s\n%s\n%s\n\n' "======" " DLC:" "======"| tee -a "$HOME/.magog/cdn_links.txt"
 for part in $gparts_dlc; do
-## get dlc title
-printf '%s\n' "$game"| grep -B8 "$part"| grep -o -m1 '"title":.*'| cut -d '"' -f 4| tee -a "$HOME/.magog/cdn_links.txt"
+get_part_name
 get_cdn_link
 done
 }
@@ -151,11 +145,20 @@ done
 [ -n "$gparts_patches" ] && {
 printf '\n\n%s\n%s\n%s\n\n' "==========" " PATCHES:" "=========="| tee -a "$HOME/.magog/cdn_links.txt"
 for part in $gparts_patches; do
-## get patch name
-printf '%s\n' "$game"| grep -A1 "$part"| grep -o '"name":.*'| cut -d '"' -f 4| tee -a "$HOME/.magog/cdn_links.txt"
+get_part_name
 get_cdn_link
 done
 }
+}
+
+
+get_part_name () {
+## gets name for the $part in question
+part_name="$(printf '%s\n' "$game"| grep -A1 "$part"| grep -o -m1 '"name":.*'| cut -d '"' -f 4)"
+## if the $part_name isn't already in 'cdn_links.txt', add it
+## we do this because patches with multiple parts are not numbered, and thus the output might be confusing.
+! grep -q "$part_name" "$HOME/.magog/cdn_links.txt" && \
+printf '%s\n' "== $part_name =="| tee -a "$HOME/.magog/cdn_links.txt"
 }
 
 
@@ -166,10 +169,7 @@ get_cdn_link () {
 sleep 0.4
 curl -sLIb "$HOME/.magog/.gog-cookie.txt" -c "$HOME/.magog/.new_gog-cookie.txt" "https://www.gog.com/downloads/$part"| \
 grep 'location'| grep -o 'https.*' >> "$HOME/.magog/cdn_links.txt"
-
-## refresh gog cookie
 refresh_gog_cookie
-
 ## print newline between links
 printf '\n' >> "$HOME/.magog/cdn_links.txt"
 }
