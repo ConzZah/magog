@@ -1,6 +1,6 @@
 #!/usr/bin/env sh
 
-### /// magog.sh // ConzZah // 2026-10-22 22:52 ///
+### /// magog.sh // ConzZah // 2026-10-24 03:10 ///
 
 ## depcheck
 deps="firefox curl grep sed cut fzf tr wc"
@@ -129,7 +129,8 @@ printf '\n%s\n\n' "GAME: $gname_hr // VERSION: $version_basegame" > "$HOME/.mago
 printf '\n%s\n%s\n%s\n\n' "============" " BASE GAME:" "============"| tee -a "$HOME/.magog/cdn_links.txt"
 for part in $gparts_basegame; do
 get_part_name
-get_cdn_link
+get_part_size
+get_part_link
 done
 
 ### dlc ###
@@ -137,7 +138,8 @@ done
 printf '\n\n%s\n%s\n%s\n\n' "======" " DLC:" "======"| tee -a "$HOME/.magog/cdn_links.txt"
 for part in $gparts_dlc; do
 get_part_name
-get_cdn_link
+get_part_size
+get_part_link
 done
 }
 
@@ -146,28 +148,39 @@ done
 printf '\n\n%s\n%s\n%s\n\n' "==========" " PATCHES:" "=========="| tee -a "$HOME/.magog/cdn_links.txt"
 for part in $gparts_patches; do
 get_part_name
-get_cdn_link
+get_part_size
+get_part_link
 done
 }
+}
+
+
+get_part_size () {
+## gets filesize of the part in question
+part_size="$(printf '%s\n' "$game"| grep -A4 "$part"| grep -o -m1 '"size":.*'| cut -d '"' -f 4)"
+printf '%s\n' "== $part_size =="| tee -a "$HOME/.magog/cdn_links.txt"
 }
 
 
 get_part_name () {
 ## gets name for the $part in question
 part_name="$(printf '%s\n' "$game"| grep -A1 "$part"| grep -o -m1 '"name":.*'| cut -d '"' -f 4)"
-## if the $part_name isn't already in 'cdn_links.txt', add it
-## we do this because patches with multiple parts are not numbered, and thus the output might be confusing.
-! grep -q "$part_name" "$HOME/.magog/cdn_links.txt" && \
+
+## if $part_name is 'DLC', we got a placeholder,
+## and need to go for title instead of name to get the actual value.
+[ "$part_name" = "DLC" ] && \
+part_name="$(printf '%s\n' "$game"| grep -B8 "$part"| grep -o -m1 '"title":.*'| cut -d '"' -f 4)"
+
 printf '%s\n' "== $part_name =="| tee -a "$HOME/.magog/cdn_links.txt"
 }
 
 
-get_cdn_link () {
+get_part_link () {
 ## fetch cdn-link for the $part in question
 ## NOTE: with every iteration, new cookies will be set, so we never need to worry about expiry,
 ## UNLESS the user doesn't request a game within 9 months or terminates the session (via web in this case)
 sleep 0.4
-curl -sLIb "$HOME/.magog/.gog-cookie.txt" -c "$HOME/.magog/.new_gog-cookie.txt" "https://www.gog.com/downloads/$part"| \
+curl -sLIb "$HOME/.magog/.gog-cookie.txt" -c "$HOME/.magog/.new_gog-cookie.txt" "https://www.gog.com/downloads/${part}"| \
 grep 'location'| grep -o 'https.*' >> "$HOME/.magog/cdn_links.txt"
 refresh_gog_cookie
 ## print newline between links
@@ -176,10 +189,10 @@ printf '\n' >> "$HOME/.magog/cdn_links.txt"
 
 
 display_cdn_links () {
+remove_unicode_chars "$HOME/.magog/cdn_links.txt"
 ## NOTE: if we used set -x, don't clear the screen, so debugging is still possible
 ! printf '%s\n' "$-"| grep -q "x" && clear
 ## display the result
-printf '\n%s\n\n' "--> DONE"
 cat "$HOME/.magog/cdn_links.txt"
 }
 
@@ -203,7 +216,7 @@ return 0
 
 refresh_gog_cookie () {
 ## make sure that '.new_gog-cookie.txt' becomes our current cookie
-## NOTE: '.new_gog-cookie.txt' will be created by: get_game_id_json & get_cdn_link
+## NOTE: '.new_gog-cookie.txt' will be created by: get_game_id_json & get_part_link
 [ -f "$HOME/.magog/.new_gog-cookie.txt" ] && { 
 cat "$HOME/.magog/.new_gog-cookie.txt" > "$HOME/.magog/.gog-cookie.txt"
 rm -f "$HOME/.magog/.new_gog-cookie.txt"
@@ -278,8 +291,13 @@ sleep 0.4
 cg="$((cg + 1))"
 done
 
-## get rid of (the most common) unicode chars after the loop so we don't have to do it every iteration
-sed -i -e 's#u0026##g' -e 's#u0027##g' -e 's#u2013##g' -e 's#u2019##g' -e 's#u2122##g' -e 's#u00ae##g' -e 's#u003C##g' -e 's#u003E##g' -e 's#u014d##g' "$HOME/.magog/index.txt"
+remove_unicode_chars "$HOME/.magog/index.txt"
+}
+
+
+remove_unicode_chars () {
+## remove (the most common) unicode chars
+sed -i -e 's#u0026##g' -e 's#u0027##g' -e 's#u2013##g' -e 's#u2019##g' -e 's#u2122##g' -e 's#u00ae##g' -e 's#u003C##g' -e 's#u003E##g' -e 's#u014d##g' "$1"
 }
 
 
