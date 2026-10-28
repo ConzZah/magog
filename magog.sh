@@ -1,6 +1,6 @@
 #!/usr/bin/env sh
 
-### /// magog.sh // ConzZah // 2026-10-26 22:01 ///
+### /// magog.sh // ConzZah // 2026-10-28 06:02 ///
 
 ## depcheck
 deps="firefox curl grep sed cut fzf tr wc"
@@ -13,27 +13,18 @@ done
 [ -n "$missing_deps" ] && printf '\n%s\n\n' "--> MISSING DEPS: $missing_deps" && exit 1
 
 init () {
+clear_screen
 ## make sure '$HOME/.magog' exists
 [ ! -d "$HOME/.magog" ] && mkdir -p "$HOME/.magog"
 
-## check if '$HOME/.magog/.gog-cookie' exists, and get it from firefox if it doesn't.
+## check if '$HOME/.magog/.gog-cookie' exists, 
+## get it from firefox if it doesn't.
 get_gog_cookie
 
-## make sure '$HOME/.magog/index.txt' exists and is up to date before doing anything else
-[ ! -f "$HOME/.magog/index.txt" ] && gog_library_indexer
+## make sure '$HOME/.magog/index.txt' 
+## (the local title_id index) exists and is up to date
+gog_library_indexer
 
-## if $gc is greater than $lc (line-count) of '$HOME/.magog/index.txt',
-## then we're missing some games.
-[ -f "$HOME/.magog/index.txt" ] && {
-get_title_id_index
-lc="$(wc -l "$HOME/.magog/index.txt"| cut -d ' ' -f 1)"
-[ "$gc" -gt "$lc" ] && \
-printf '\n%s\n' "--> SYNCING GOG-LIBRARY.." && \
-dont_show_progress="1" && gog_library_indexer
-
-## if $gc and $lc are equal, there is no need to sync.
-[ "$gc" = "$lc" ] && printf '\n%s\n' "--> GOG-LIBRARY IN SYNC." 
-}
 ## clean '$HOME/.magog/cdn_links.txt'
 rm -f "$HOME/.magog/cdn_links.txt" >/dev/null
 
@@ -51,7 +42,7 @@ check_if_game_exists_in_index
 ## NOTE: it means there are multiple possible matches.
 [ "$(printf '%s\n' "$game"| wc -l)"  -gt "1" ] && {
 chosen_game=""
-chosen_game="$(printf '%s\n' "$game"| cut -d '~' -f 2| fzf --header "--> CHOOSE A GAME")"
+chosen_game="$(printf '%s\n' "$game"| cut -d '~' -f 2| fzf --header "--> WELCOME BACK: ${user}, CHOOSE A GAME")"
 pick_first_game="1"
 check_if_user_chose_a_game_with_fzf
 check_if_game_exists_in_index
@@ -62,7 +53,7 @@ check_if_game_exists_in_index
 ## launch fzf, so the user can choose one from their library
 [ -z "$game" ] && {
 chosen_game=""
-chosen_game="$(cut -d '~' -f 2 < "$HOME/.magog/index.txt"| fzf --header "--> CHOOSE A GAME")"
+chosen_game="$(cut -d '~' -f 2 < "$HOME/.magog/index.txt"| fzf --header "--> WELCOME BACK: ${user}, CHOOSE A GAME")"
 pick_first_game="1"
 check_if_user_chose_a_game_with_fzf
 check_if_game_exists_in_index
@@ -95,7 +86,6 @@ printf '\n%s\n\n' "--> ERROR: GAME: '$game' IS NOT IN INDEX" && exit 1
 get_game_id_json () {
 ## get game details (${game_id}.json)
 game="$(curl -sb "$HOME/.magog/.gog-cookie.txt" -c "$HOME/.magog/.new_gog-cookie.txt" "https://www.gog.com/en/account/gameDetails/${game_id}.json" --compressed| sed 's#\\##g'| tr ',' '\n')"
-## refresh gog cookie
 refresh_gog_cookie
 }
 
@@ -107,9 +97,6 @@ gname_hr="$(printf '%s\n' "$game"| cut -d '~' -f 2)"
 
 ## get the $game_link (so we can tell dlc from basegame)
 game_link="$(printf '%s\n' "$game"| cut -d '~' -f 3)"
-
-## tell the user to not be impatient
-printf '\n%s\n\n' "--> GENERATING CDN-LINKS FOR: '$gname_hr' PLEASE WAIT.."
 
 ## get game details
 get_game_id_json
@@ -130,15 +117,18 @@ gparts_dlc="$(printf '%s\n' "$part_list_complete"| grep -v "${game_link}/${lang}
 gparts_patches="$(printf '%s\n' "$part_list_complete"| grep -o ".*${lang}${platc}patch.*")"
 
 ## if $gparts_basegame is empty, then the game is not available for the selected platform
-[ -z "$gparts_basegame" ] && printf '%s\n' "--> ERROR: $gname_hr IS NOT AVAILABLE FOR: $platform" && exit 1
+[ -z "$gparts_basegame" ] && printf '\n%s\n\n' "--> ERROR: $gname_hr IS NOT AVAILABLE FOR: $platform" && exit 1
+
+## tell the user to not be impatient
+printf '\n%s\n\n' "--> GENERATING CDN-LINKS FOR: '$gname_hr' PLEASE WAIT.."
 
 ## get current game version
 version_basegame="$(printf '%s\n' "$game"|grep -m1 '"version":' | cut -d '"' -f 4)"
 
 ## write game name & game version to cdn_links.txt
-printf '\n%s\n\n' "// GAME: $gname_hr // VERSION: $version_basegame // PLATFORM: $platform //" > "$HOME/.magog/cdn_links.txt"
+printf '\n%s\n\n' "// GAME: $gname_hr // VERSION: $version_basegame // PLATFORM: $platform //"| tee -a "$HOME/.magog/cdn_links.txt"
 
-## get the cdn links for the individual parts ##
+#### get the cdn links for the individual parts ####
 
 ### basegame ###
 printf '\n%s\n%s\n%s\n\n' "============" " BASE GAME:" "============"| tee -a "$HOME/.magog/cdn_links.txt"
@@ -170,13 +160,6 @@ done
 }
 
 
-get_part_size () {
-## gets filesize of the part in question
-part_size="$(printf '%s\n' "$game"| grep -A4 "$part"| grep -o -m1 '"size":.*'| cut -d '"' -f 4)"
-printf '%s\n' "== $part_size =="| tee -a "$HOME/.magog/cdn_links.txt"
-}
-
-
 get_part_name () {
 ## gets name for the $part in question
 part_name="$(printf '%s\n' "$game"| grep -A1 "$part"| grep -o -m1 '"name":.*'| cut -d '"' -f 4)"
@@ -185,8 +168,12 @@ part_name="$(printf '%s\n' "$game"| grep -A1 "$part"| grep -o -m1 '"name":.*'| c
 ## and need to go for title instead of name to get the actual value.
 [ "$part_name" = "DLC" ] && \
 part_name="$(printf '%s\n' "$game"| grep -B8 "$part"| grep -o -m1 '"title":.*'| cut -d '"' -f 4)"
+}
 
-printf '%s\n' "== $part_name =="| tee -a "$HOME/.magog/cdn_links.txt"
+
+get_part_size () {
+## gets filesize of the part in question
+part_size="$(printf '%s\n' "$game"| grep -A4 "$part"| grep -o -m1 '"size":.*'| cut -d '"' -f 4)"
 }
 
 
@@ -195,18 +182,18 @@ get_part_link () {
 ## NOTE: with every iteration, new cookies will be set, so we never need to worry about expiry,
 ## UNLESS the user doesn't request a game within 9 months or terminates the session (via web in this case)
 sleep 0.4
-curl -sLIb "$HOME/.magog/.gog-cookie.txt" -c "$HOME/.magog/.new_gog-cookie.txt" "https://www.gog.com/downloads/${part}"| \
-grep 'location'| grep -o 'https.*' >> "$HOME/.magog/cdn_links.txt"
+part_link="$(curl -sLIb "$HOME/.magog/.gog-cookie.txt" -c "$HOME/.magog/.new_gog-cookie.txt" "https://www.gog.com/downloads/${part}"| \
+grep 'location'| grep -o 'https.*')"
 refresh_gog_cookie
-## print newline between links
-printf '\n' >> "$HOME/.magog/cdn_links.txt"
+
+## write $part_name, $part_size and $part_link to '$HOME/.magog/cdn_links'
+printf '%s\n%s\n\n' "== $part_name // $part_size ==" "$part_link"| tee -a "$HOME/.magog/cdn_links.txt"
 }
 
 
 display_cdn_links () {
 remove_unicode_chars "$HOME/.magog/cdn_links.txt"
-## NOTE: if we used set -x, don't clear the screen, so debugging is still possible
-! printf '%s\n' "$-"| grep -q "x" && clear
+clear_screen
 ## display the result
 cat "$HOME/.magog/cdn_links.txt"
 }
@@ -240,10 +227,13 @@ rm -f "$HOME/.magog/.new_gog-cookie.txt"
 
 
 get_title_id_index () {
+index=""
 ## obtain $index of title-id's and format them for processing
-[ -z "$index" ] && {
 index="$(curl -sb "$HOME/.magog/.gog-cookie.txt" -c "$HOME/.magog/.new_gog-cookie.txt" 'https://menu.gog.com/v1/account/licences' --compressed)"
 refresh_gog_cookie
+
+## if $index contains nothing at all, try to ping gog.com, to see if we even have an active internet connection.
+[ -z "$index" ] && { ! ping -c 1 -t 1 'gog.com' >/dev/null 2>&1 && printf '\n%s\n\n' "--> CONNECT TO THE INTERNET AND TRY AGAIN." && exit 1 ;}
 
 ## if $index contains 'Unable to authenticate', abort.
 printf '%s\n' "$index"| grep -q 'Unable to authenticate' && \
@@ -254,32 +244,45 @@ printf '%s\n' "--> 	ERROR: 'Unable to authenticate'" && \
 ## so we can use it in the for loop 
 index="$(printf '%s\n' "$index"| tr '[]",' ' '| tr -s ' '| tr ' ' '\n')"
 
-## set cg to 1 (cg = current-game)
+## set $cg to 1 ($cg = current-game)
 cg="1"
 
-## get the actual number of games on the gog account (gc = game-count)
-gc="$(curl -sb "$HOME/.magog/.gog-cookie.txt" 'https://menu.gog.com/v1/account/stats'| \
-tr ',' '\n'| grep -o 'games.*'| cut -d ':' -f 2)"
+## get user-id, username, and number of games
+udat="$(curl -sb "$HOME/.magog/.gog-cookie.txt" https://www.gog.com/userData.json| tr ',' '\n'| grep -oE -m3 '"userId":.*|"username":.*|{"games":.*')"
+
+## ($uid = user-id)
+## NOTE: $uid is currently unused, but needed for when i add multi-account support in the (near) future.
+## uid="$(printf '%s\n' "$udat"| sed -n '1 p'| cut -d '"' -f 4)"
+
+## ($user = username)
+user="$(printf '%s\n' "$udat"| sed -n '2 p'| cut -d '"' -f 4)"
+
+## ($gc = game-count)
+gc="$(printf '%s\n' "$udat"| sed -n '3 p'| cut -d ':' -f 2)"
 
 ## if $gc is 0 or unset, then you don't have any games, or magog can't determine how many
 [ "$gc" = "0" ] || [ -z "$gc" ] && printf '\n%s\n\n' "--> CAN'T GET NUMBER OF GAMES ON THIS GOG ACCOUNT." && \
 { rm -f "$HOME/.magog/.gog-cookie.txt"; exit 1 ;}
-
-## show the user how many games they have
-printf '\n%s\n' "--> GAMES ON THIS GOG ACCOUNT: $gc"
-}
 }
 
 
 gog_library_indexer () {
+printf '\n%s\n' "--> SYNCING GOG-LIBRARY, PLEASE WAIT.."
 get_title_id_index
+
+## make sure that '$HOME/.magog/index.txt' exists
+[ ! -f "$HOME/.magog/index.txt" ] && touch "$HOME/.magog/index.txt"
+
+## count lines of '$HOME/.magog/index.txt'
+lc="$(wc -l "$HOME/.magog/index.txt"| cut -d ' ' -f 1)"
+
+## if $gc and $lc are equal, there is no need to sync. otherwise continue.
+[ "$gc" = "$lc" ] && printf '\n%s\n' "--> GOG-LIBRARY IN SYNC." && clear_screen && return 0
 
 ## main loop to process them gamez
 for game_id in $index; do
 
-## show the user which game we're processing 
-## (if $dont_show_progress isn't set)
-[ -z "$dont_show_progress" ] && \
+## show the user which game we're processing
 printf '%s\n' "--> [${cg} // ${gc}]"
 
 ## check if $game_id is already in index.txt,
@@ -316,6 +319,7 @@ cg="$((cg + 1))"
 done
 
 remove_unicode_chars "$HOME/.magog/index.txt"
+clear_screen
 }
 
 
@@ -325,10 +329,18 @@ sed -i -e 's#u0026##g' -e 's#u0027##g' -e 's#u2013##g' -e 's#u2019##g' -e 's#u21
 }
 
 
+clear_screen () {
+## if magog was launched with set -x, 
+## don't clear the screen, so debugging is still possible
+! printf '%s\n' "$-"| grep -q "x" && clear
+return 0
+}
+
+
+### PRE-LAUNCH ###
 ## standard language, platform-code and platform for games
 lang="en"; platc="1"; platform="Windows"
 
-### PRE-LAUNCH ###
 ## process arguments
 while [ "$#" -gt "0" ]; do
 case $1 in
@@ -336,9 +348,9 @@ case $1 in
 '-index'|'-INDEX'|'-i') gog_library_indexer; exit ;;
 
 ## specify platform (windows, mac, or linux)
-'-w'|'-W'|'-windows'|'-WINDOWS') platc="1" && platform="Windows"; shift ;;
-'-m'|'-M'|'-mac'|'-MAC') platc="2" && platform="Mac"; shift ;;
-'-l'|'-L'|'-linux'|'-LINUX') platc="3" && platform="Linux"; shift ;;
+'-w'|'-W'|'-windows'|'-WINDOWS') platc="1"; platform="Windows"; shift ;;
+'-m'|'-M'|'-mac'|'-MAC') platc="2"; platform="Mac"; shift ;;
+'-l'|'-L'|'-linux'|'-LINUX') platc="3"; platform="Linux"; shift ;;
 
 ## NOTE: $game is only ever set once per run.
 *) [ -z "$game" ] && { game="$1"; shift ;}
