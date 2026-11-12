@@ -1,14 +1,14 @@
 #!/usr/bin/env sh
 
-### /// magog.sh // ConzZah // 2026-11-09 15:38 ///
+### /// magog.sh // ConzZah // 2026-11-12 14:02 ///
 
 # shellcheck disable=SC2009 # REASON: pgrep is not POSIX
 
 ## depcheck
-deps="sqlite3 firefox curl grep sed cut fzf tr wc"
+deps="sqlite3 curl grep sed cut fzf tr wc"
 missing_deps=""
 for dep in $deps; do
-! command -v "$dep" >/dev/null && missing_deps="$dep"
+! command -v "$dep" >/dev/null && missing_deps="$dep $missing_deps"
 done
 
 ## if $missing_deps is empty, tell the user which are missing & exit.
@@ -18,7 +18,8 @@ done
 magog_base="$HOME/.magog"
 magog_accounts_dir="${magog_base}/accounts"
 magog_accounts_txt="${magog_accounts_dir}/accounts.txt"
-game_id_json="/tmp/game_id.json"
+game_id_list="${magog_base}/.tmp/game_id_list.txt"
+game_id_json="${magog_base}/.tmp/game_id.json"
 
 ## standard language, platform-code and platform for games
 ## NOTE: $platc="1" Windows, $platc="2" Mac, $platc=3 Linux
@@ -29,6 +30,7 @@ init () {
 clear_screen
 ## make sure '${magog_base}' exists
 mkdir -p "${magog_base}"
+mkdir -p "${magog_base}/.tmp"
 
 ## check if we have an active internet connection and proceed to login_to_gog
 check_for_internet_connection
@@ -269,7 +271,6 @@ game_count_lines="$(wc -l "$index"| cut -d ' ' -f 1)"
 
 get_game_id_list () {
 ## init vars
-game_id_list="/tmp/game_id_list.txt"
 game_count=""; game_count_lines=""; current_game_count="1"
 get_gamecount
 
@@ -358,15 +359,15 @@ remove_refunded_games () {
 ## if $game_count_lines is greater than $game_count, figure out what's no longer in $game_id_list.
 count_index_txt_lines
 [ "$game_count_lines" -gt "$game_count" ] && {
-cp "$index" "/tmp/index-${uid}.txt"
+cp "$index" "${magog_base}/.tmp/index-${uid}.txt"
 while read -r game_id; do
 game_id="$(printf '%s\n' "$game_id"| cut -d '~' -f 1)"
 ! grep -q "$game_id" "$game_id_list" && {
 refunded_game_line="$(grep -n -m1 "$game_id" "$index"| cut -d ':' -f 1)"
 sed -i "$refunded_game_line d" "$index"
 }
-done < "/tmp/index-${uid}.txt"
-rm -f "/tmp/index-${uid}.txt"
+done < "${magog_base}/.tmp/index-${uid}.txt"
+rm -f "${magog_base}/.tmp/index-${uid}.txt"
 }
 }
 
@@ -375,8 +376,8 @@ remove_unicode_codepoints () {
 ## remove (the most common) unicode codepoints
 sed -i -e 's#u0026##g' -e 's#u0027##g' -e 's#u2013##g' -e 's#u2014##g' -e 's#u2019##g' -e 's#u2122##g' -e 's#u00ae##g' -e 's#u003C##g' -e 's#u003E##g' -e 's#u014d##g' "$1"
 ## also make sure that there are no extra spaces
-tr -s ' ' < "$1" > "/tmp/NoExtraSpacesPls"
-mv -f "/tmp/NoExtraSpacesPls" "$1"
+tr -s ' ' < "$1" > "${magog_base}/.tmp/NoExtraSpacesPls"
+mv -f "${magog_base}/.tmp/NoExtraSpacesPls" "$1"
 }
 
 
@@ -420,11 +421,14 @@ login_to_gog () {
 ## get the total number of lines of '${magog_accounts_txt}'
 get_total_account_txt_lines
 
-## check if the user explicitly specified to login with a 2nd account and proceed to get_gog_cookie
+## check if the user wanted to add a cookie manually
+[ -n "$manual_gog_cookie" ] && get_gog_cookie
+
+## check if the user wanted to login with a 2nd account (via firefox)
 [ -n "$login_with_2nd_account" ] && get_gog_cookie
 
 ## if $total_acc_ln is 0, then we don't have any accounts in 'accounts.txt'
-[ "$total_acc_ln" = "0" ] && { get_gog_cookie ;}
+[ "$total_acc_ln" = "0" ] && get_gog_cookie
 
 ## if $total_acc_ln is equal to 1, AND $login_with_2nd_account is zero,
 ## get data from accounts.txt without prompting the user for an account 
@@ -501,7 +505,28 @@ check_if_gog_al_is_present () {
 { rm -f "${magog_accounts_dir}/.cookie-tmp"; exit 1 ;}
 }
 
-## get gog cookie
+
+## TODO
+## if $manual_gog_cookie is set,
+## check if the user provided a valid gog-al cookie
+## NOTE: THE GOG-AL COOKIE ALWAYS HAS A LENGTH OF 150 CHARS (without 'gog-al=' in front)
+[ -n "$manual_gog_cookie" ] && {
+
+## if the user only provided the cookie, without prefixing it with 'gog-al=', add it
+! printf '%s\n' "$manual_gog_cookie" |grep -q "^gog-al=" || \
+[ "$(printf '%s' "$manual_gog_cookie"| wc -c)" = "150" ] && \
+manual_gog_cookie="$(printf '%s\n' "$manual_gog_cookie"| sed 's#^#gog-al=#')"
+
+## check if the cookie is valid
+rm -f "${magog_accounts_dir}/.cookie-tmp"
+curl -sc "${magog_accounts_dir}/.cookie-tmp" -H "Cookie: $manual_gog_cookie" "https://www.gog.com/userData.json" >/dev/null 2>&1
+
+check_if_gog_al_is_present
+add_gog_account
+exit
+}
+
+## get gog cookie via firefox
 ## if ce.sh isn't available, get it
 [ ! -f "${magog_base}/ce.sh" ] && curl -sLo "${magog_base}/ce.sh" "https://github.com/ConzZah/ce/raw/refs/heads/main/ce.sh"
 [ -f "${magog_base}/ce.sh" ] && {
@@ -511,7 +536,7 @@ check_if_gog_al_is_present () {
 sh "${magog_base}/ce.sh" | grep 'gog-al' > "${magog_accounts_dir}/.cookie-tmp"
 check_if_gog_al_is_present
 add_gog_account
-exit 0
+exit
 }
 
 ## if the user explicitly specified to login with a 2nd account, (aka --login)
@@ -527,7 +552,8 @@ printf '\n%s\n' "--> LOGIN TO YOUR GOG ACCOUNT AND CLOSE FIREFOX TO PROCEED.."
 sleep 1 
 
 ## open firefox pointing to gog.com/#openlogin
-sh "${magog_base}/firefox.sh" "https://www.gog.com/#openlogin" >/dev/null 2>&1
+sh "${magog_base}/firefox.sh" "https://www.gog.com/#openlogin" >/dev/null 2>&1 || \
+printf '\n%s\n\n' "--> FIREFOX IS NOT INSTALLED" && exit 1
 
 ## only continue once firefox's pid is not found anymore
 ## (aka firefox is closed, and cookies.sqlite is unlocked)
@@ -541,7 +567,7 @@ sleep 2; sh "${magog_base}/ce.sh" "${magog_base}/fpp/cookies.sqlite"| grep 'gog-
 rm -rf "${magog_base}/fpp"
 check_if_gog_al_is_present
 add_gog_account
-exit 0
+exit
 }
 }
 }
@@ -566,14 +592,15 @@ uid="$(printf '%s\n' "$udat"| sed -n '1 p'| cut -d '"' -f 4)"
 ## ($user = username)
 user="$(printf '%s\n' "$udat"| sed -n '2 p'| cut -d '"' -f 4)"
 
-## write $uid and $user to ${magog_accounts_txt}, if it shouldn't already exist.
-grep -q "${uid}~${user}" "${magog_accounts_txt}" && \
-printf '\n%s\n\n' "--> GOG ACCOUNT '$user' EXISTS ALREADY." && exit 0
-
-printf '%s\n' "${uid}~${user}" >> "${magog_accounts_txt}"
+## set vars & update cookie regardless of if it already exists or not
 cookie="${magog_accounts_dir}/.gog-cookie-${uid}.txt"
 index="${magog_accounts_dir}/index-${uid}.txt"
 mv "${magog_accounts_dir}/.cookie-tmp" "$cookie"
+
+## write $uid and $user to ${magog_accounts_txt}, only if it shouldn't already exist.
+grep -q "${uid}~${user}" "${magog_accounts_txt}" && \
+printf '\n%s\n\n' "--> GOG ACCOUNT '$user' EXISTS ALREADY." && exit 0
+printf '%s\n' "${uid}~${user}" >> "${magog_accounts_txt}"
 printf '\n%s\n\n' "--> GOG ACCOUNT '$user' SUCCESSFULLY ADDED."
 gog_library_indexer
 return 0
@@ -678,8 +705,13 @@ acc_ln=""; total_acc_ln=""; game=""; game_count=""; game_count_lines=""
 while [ "$#" -gt "0" ]; do
 case $1 in
 
-## if --login was specified, set the corresponding variable
+## if --login was specified, set the corresponding variable and get the cookie via firefox
 '--login') login_with_2nd_account="1"; shift ;;
+
+## if -c was specified, get the gog cookie manually, instead of using firefox
+'-c') shift; [ -z "$1" ] && printf '\n%s\n\n' "--> ERROR: '-c' REQUIRES A GOG-AL COOKIE AS ARGUMENT." && exit 1 
+[ -n "$1" ] && manual_gog_cookie="$1"
+;;
 
 ## if --user was specified, check if the account exists in accounts.txt and choose it via arguments
 '-u'|'--user') shift; [ -z "$1" ] && printf '\n%s\n\n' "--> ERROR: '--user' REQUIRES AN ARGUMENT." && exit 1
@@ -733,6 +765,7 @@ printf '%s\n' \
  -i / --index  force re-index of your gog library
  -w / -m / -l  choose between windows / mac / linux versions 
  -1            always take the first match without prompting
+ -c            provide gog-al cookie manually
  -h / --help   show this help page
 '
 exit 0
