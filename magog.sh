@@ -1,6 +1,6 @@
 #!/usr/bin/env sh
 
-### /// magog.sh // ConzZah // 2026-11-12 14:02 ///
+### /// magog.sh // ConzZah // 2026-11-17 02:44 ///
 
 # shellcheck disable=SC2009 # REASON: pgrep is not POSIX
 
@@ -16,6 +16,7 @@ done
 
 ## set essential vars
 magog_base="$HOME/.magog"
+cdn_links_dir="${magog_base}/cdn_links"
 magog_accounts_dir="${magog_base}/accounts"
 magog_accounts_txt="${magog_accounts_dir}/accounts.txt"
 game_id_list="${magog_base}/.tmp/game_id_list.txt"
@@ -28,9 +29,10 @@ lang="en"; platc="1"; platform="Windows"
 
 init () {
 clear_screen
-## make sure '${magog_base}' exists
-mkdir -p "${magog_base}"
-mkdir -p "${magog_base}/.tmp"
+## make sure '${magog_base}' and all of it's subdirs exist
+[ -d "${magog_base}/.tmp" ] && rm -fr "${magog_base}/.tmp"
+mkdir -p  "${magog_base}" "${magog_base}/.tmp" "$magog_accounts_dir" "$cdn_links_dir"
+check_for_stale_cdn_links
 
 ## check if we have an active internet connection and proceed to login_to_gog
 check_for_internet_connection
@@ -56,8 +58,6 @@ printf '\n%s\n\n' "--> ERROR: GAME: '$query' IS NOT IN INDEX" && exit 1
 ## if $pick_first_game is nonzero, print only the first line in $game.
 [ -n "$pick_first_game" ] && game="$(printf '%s\n' "$game"| sed -n '1 p')"
 
-## if $choose_game_via_args is set, assign $game to $chosen_game
-[ -n "$choose_game_via_args" ] && chosen_game="$game"
 return 0
 }
 
@@ -118,7 +118,9 @@ case "$chosen_game" in
 'EXIT MAGOG') printf '\n%s\n\n' "--> HAVE A NICE DAY :D" && exit 0 ;;
 '<-- SELECT ACCOUNT')
 uid=""; user=""; index=""; acc_ln=""; query=""; game=""; chosen_game=""; view_all_games=""
-login_to_gog; choose_game_via_fzf;;
+login_to_gog
+choose_game_via_fzf
+;;
 esac
 
 pick_first_game="1"
@@ -126,10 +128,10 @@ check_if_user_chose_a_game
 check_if_game_exists_in_index
 
 ## if $view_all_games is nonzero, get values and re-index
-[ -n "$view_all_games" ] && { 
-choose_game_from_all_indexes
+[ -n "$view_all_games" ] && {
 choose_gog_account_via_args "$uid"
 gog_library_indexer
+choose_game_from_all_indexes
 }
 }
 
@@ -186,14 +188,14 @@ printf '\n%s\n\n' "--> GENERATING CDN-LINKS FOR: '$gname_hr' PLEASE WAIT.."
 ## get current game version
 version_basegame="$(grep -m1 '"version":' "$game_id_json"| cut -d '"' -f 4)"
 
-## write game name & game version to cdn_links.txt
-[ -f "${magog_base}/cdn_links.txt" ] && rm -f "${magog_base}/cdn_links.txt"
-printf '%s\n\n' "// GAME: $gname_hr // VERSION: $version_basegame // PLATFORM: $platform //"| tee -a "${magog_base}/cdn_links.txt"
+## write game name & game version to "${cdn_links_dir}/${game_link}.txt"
+[ -f "${cdn_links_dir}/${game_link}.txt" ] && rm -f "${cdn_links_dir}/${game_link}.txt"
+printf '%s\n\n' "// GAME: $gname_hr // VERSION: $version_basegame // PLATFORM: $platform //"| tee -a "${cdn_links_dir}/${game_link}.txt"
 
 #### get the cdn links for the individual parts ####
 
 ### basegame ###
-printf '\n%s\n%s\n%s\n\n' "============" " BASE GAME:" "============"| tee -a "${magog_base}/cdn_links.txt"
+printf '\n%s\n%s\n%s\n\n' "============" " BASE GAME:" "============"| tee -a "${cdn_links_dir}/${game_link}.txt"
 for part in $gparts_basegame; do
 get_part_name
 get_part_size
@@ -202,7 +204,7 @@ done
 
 ### dlc ###
 [ -n "$gparts_dlc" ] && {
-printf '\n\n%s\n%s\n%s\n\n' "======" " DLC:" "======"| tee -a "${magog_base}/cdn_links.txt"
+printf '\n\n%s\n%s\n%s\n\n' "======" " DLC:" "======"| tee -a "${cdn_links_dir}/${game_link}.txt"
 for part in $gparts_dlc; do
 get_part_name
 get_part_size
@@ -212,7 +214,7 @@ done
 
 ### patches ###
 [ -n "$gparts_patches" ] && {
-printf '\n\n%s\n%s\n%s\n\n' "==========" " PATCHES:" "=========="| tee -a "${magog_base}/cdn_links.txt"
+printf '\n\n%s\n%s\n%s\n\n' "==========" " PATCHES:" "=========="| tee -a "${cdn_links_dir}/${game_link}.txt"
 for part in $gparts_patches; do
 get_part_name
 get_part_size
@@ -249,17 +251,39 @@ grep 'location'| grep -o 'https.*')"
 refresh_gog_cookie
 
 ## write $part_name, $part_size and $part_link to '${magog_base}/cdn_links'
-printf '%s\n%s\n\n' "== $part_name // $part_size ==" "$part_link"| tee -a "${magog_base}/cdn_links.txt"
+printf '%s\n%s\n\n' "== $part_name // $part_size ==" "$part_link"| tee -a "${cdn_links_dir}/${game_link}.txt"
 }
 
 
 display_cdn_links () {
-remove_unicode_codepoints "${magog_base}/cdn_links.txt"
+remove_unicode_codepoints "${cdn_links_dir}/${game_link}.txt"
 clear_screen
-printf '%s\n' "LINKS ARE VALID FOR 24H!" >> "${magog_base}/cdn_links.txt"
+printf '%s\n' "LINKS ARE VALID FOR 24H!" >> "${cdn_links_dir}/${game_link}.txt"
 ## display the result
-cat "${magog_base}/cdn_links.txt"
+cat "${cdn_links_dir}/${game_link}.txt"
 exit 0
+}
+
+
+check_for_stale_cdn_links () {
+## due to cdn-links only being valid for 24h,
+## remove any that are older than 86400 seconds.
+## get current time in seconds since epoch
+current_time="$(date '+%s')"
+
+## get all filenames in $cdn_links_dir
+cdn_links="$(find "${cdn_links_dir}" -type f| tr '\n' ' ')"
+
+for file in $cdn_links; do
+## get time of file creation in seconds since epoch
+file_creation_time="$(stat --printf='%W' "$file")"
+
+## calculate the difference between $current_time and $file_creation_time
+elapsed_time="$((current_time - file_creation_time))"
+
+## if elapsed_time is greater or equal to 86400, delete the file
+[ "$elapsed_time" -ge "86400" ] && rm -f "$file"
+done
 }
 
 
@@ -298,8 +322,13 @@ get_game_id_list
 mv "$index.bak" "$index" 
 clear_screen; printf '%s\n' "--> SYNCING ${user}'s LIBRARY, PLEASE WAIT.."; sleep 0.7; clear_screen
 
-## if $game_count_lines and $game_count are equal, there is no need to sync. otherwise continue.
+## if $game_count_lines and $game_count are equal, there is no need to sync and we return, otherwise continue.
 [ "$game_count" = "$game_count_lines" ] && clear_screen && printf '%s\n' "$synced" && sleep 0.7 && clear_screen && return 0
+
+## if $game is already set, create $game_bak
+## NOTE: this only happens if the user chooses a game via args
+## or 'VIEW ALL GAMES', and we still need to sync
+[ -n "$game" ] && game_bak="$game"
 
 ## main loop to process them gamez
 while read -r game_id; do
@@ -505,8 +534,6 @@ check_if_gog_al_is_present () {
 { rm -f "${magog_accounts_dir}/.cookie-tmp"; exit 1 ;}
 }
 
-
-## TODO
 ## if $manual_gog_cookie is set,
 ## check if the user provided a valid gog-al cookie
 ## NOTE: THE GOG-AL COOKIE ALWAYS HAS A LENGTH OF 150 CHARS (without 'gog-al=' in front)
@@ -533,7 +560,7 @@ exit
 
 ## if $total_acc_ln is 0, get the gog cookie from the last used firefox profile
 [ "$total_acc_ln" = "0" ]  && {
-sh "${magog_base}/ce.sh" | grep 'gog-al' > "${magog_accounts_dir}/.cookie-tmp"
+sh "${magog_base}/ce.sh" 2>/dev/null| grep 'gog-al' > "${magog_accounts_dir}/.cookie-tmp"
 check_if_gog_al_is_present
 add_gog_account
 exit
@@ -549,21 +576,22 @@ curl -sLo "${magog_base}/firefox.sh" "https://github.com/ConzZah/fpp/raw/refs/he
 
 ## tell the user to login and close firefox after they're done
 printf '\n%s\n' "--> LOGIN TO YOUR GOG ACCOUNT AND CLOSE FIREFOX TO PROCEED.."
-sleep 1 
+sleep 1
 
 ## open firefox pointing to gog.com/#openlogin
 sh "${magog_base}/firefox.sh" "https://www.gog.com/#openlogin" >/dev/null 2>&1 || \
-printf '\n%s\n\n' "--> FIREFOX IS NOT INSTALLED" && exit 1
+{ printf '\n%s\n\n' "--> ERROR: FIREFOX COULD NOT BE FOUND, PLEASE INSTALL FIREFOX."; exit 1 ;}
 
 ## only continue once firefox's pid is not found anymore
 ## (aka firefox is closed, and cookies.sqlite is unlocked)
-firefox_pid="$(cat "${magog_base}/fpp/.pid")"; sleep 1
+sleep 2; firefox_pid="$(cat "${magog_base}/fpp/.pid")"
 until [ -z "$firefox_pid" ]; do
 firefox_pid="$(ps -ax| grep -m1 'firefox.*--allow-downgrade --profile.*fpp'| grep -v 'grep'| tr -s ' '| cut -d ' ' -f 2)"; sleep 0.5
 done
 
 ## get the gog cookie and delete the fpp directory
-sleep 2; sh "${magog_base}/ce.sh" "${magog_base}/fpp/cookies.sqlite"| grep 'gog-al' > "${magog_accounts_dir}/.cookie-tmp"
+sleep 2; sh "${magog_base}/ce.sh" "${magog_base}/fpp/cookies.sqlite" 2>/dev/null| \
+grep 'gog-al' > "${magog_accounts_dir}/.cookie-tmp"
 rm -rf "${magog_base}/fpp"
 check_if_gog_al_is_present
 add_gog_account
@@ -661,6 +689,10 @@ choose_game_from_all_indexes () {
 ## this function applies to 'choose_game_via_args' and to 'choose_game_via_fzf'
 ## extract $index, $game & $uid from $chosen_game
 chosen_game="$game"
+
+## if $game_bak was set, load its content into $chosen_game
+[ -n "$game_bak" ] && chosen_game="$game_bak"
+
 index="$(printf '%s\n' "$chosen_game"| cut -d ':' -f 1)"
 game="$(printf '%s\n' "$chosen_game"| cut -d ':' -f 2-)"
 uid="$(printf '%s\n' "$index"| grep -o 'index.*'| sed -e 's#index-##' -e 's#.txt##')"
@@ -669,6 +701,7 @@ uid="$(printf '%s\n' "$index"| grep -o 'index.*'| sed -e 's#index-##' -e 's#.txt
 
 choose_game_via_args () {
 cookie=""; index=""
+check_for_stale_cdn_links
 check_for_internet_connection
 get_total_account_txt_lines
 unify_index
@@ -678,7 +711,7 @@ printf '%s\n' "$game"| grep -q 'https://www.gog.com/.*/game/.*' && \
 game="$(printf '%s\n' "$game"| cut -d '/' -f 6)"
 
 ## check if $game can be found in index.txt, else evac.
-check_if_game_exists_in_index
+check_if_game_exists_in_index && chosen_game="$game"
 
 ## if we have more than one line in $game,
 ## launch fzf so the user can choose one of them.
@@ -688,9 +721,9 @@ choose_game_via_fzf
 }
 
 check_if_user_chose_a_game
-choose_game_from_all_indexes
 choose_gog_account_via_args "$uid"
 gog_library_indexer
+choose_game_from_all_indexes
 
 ## get the cdn links and display them
 get_gog_links; display_cdn_links
@@ -706,7 +739,7 @@ while [ "$#" -gt "0" ]; do
 case $1 in
 
 ## if --login was specified, set the corresponding variable and get the cookie via firefox
-'--login') login_with_2nd_account="1"; shift ;;
+'-login'|'--login') login_with_2nd_account="1"; shift ;;
 
 ## if -c was specified, get the gog cookie manually, instead of using firefox
 '-c') shift; [ -z "$1" ] && printf '\n%s\n\n' "--> ERROR: '-c' REQUIRES A GOG-AL COOKIE AS ARGUMENT." && exit 1 
@@ -714,12 +747,12 @@ case $1 in
 ;;
 
 ## if --user was specified, check if the account exists in accounts.txt and choose it via arguments
-'-u'|'--user') shift; [ -z "$1" ] && printf '\n%s\n\n' "--> ERROR: '--user' REQUIRES AN ARGUMENT." && exit 1
+'-u'|'-U'|'-user'|'--user') shift; [ -z "$1" ] && printf '\n%s\n\n' "--> ERROR: '--user' REQUIRES AN ARGUMENT." && exit 1
 choose_gog_account_via_args "$1"; shift
 ;;
 
 ## if -i was specified, force a (re)index of the users gog-library
-'-i'|'-index'|'-INDEX') shift; check_for_internet_connection
+'-i'|'-I'|'-index'|'--index') shift; check_for_internet_connection
 
 ## if $1 is empty, the user didn't specify which account to sync,
 ## in this case, magog will sync all available accounts
@@ -730,16 +763,16 @@ choose_gog_account_via_args "$1"; shift
 ;;
 
 ## specify platform (windows, mac, or linux)
-'-w'|'-W'|'-windows'|'-WINDOWS') platc="1"; platform="Windows"; shift ;;
-'-m'|'-M'|'-mac'|'-MAC') platc="2"; platform="Mac"; shift ;;
-'-l'|'-L'|'-linux'|'-LINUX') platc="3"; platform="Linux"; shift ;;
+'-w'|'-W'|'-windows') platc="1"; platform="Windows"; shift ;;
+'-m'|'-M'|'-mac') platc="2"; platform="Mac"; shift ;;
+'-l'|'-L'|'-linux') platc="3"; platform="Linux"; shift ;;
 
 ## get the 1st game on the list, and don't prompt if there are more than one
 '-1'|'1') pick_first_game="1"; shift ;;
 
 ## choose a game via arguments
 ## NOTE: $game is only ever set once per run.
-'-g'|'--game') shift
+'-g'|'-G'|'-game'|'--game') shift
 [ -z "$game" ] && {
 [ -z "$1" ] && printf '\n%s\n\n' "--> ERROR: '--game' REQUIRES AN ARGUMENT." && exit 1
 game="$1"; query="$1"; choose_game_via_args="1"; choose_game_via_args ;}
