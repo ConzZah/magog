@@ -1,6 +1,6 @@
 #!/usr/bin/env sh
 
-### /// magog.sh // ConzZah // 2026-11-17 04:49 ///
+### /// magog.sh // ConzZah // 2026-11-17 19:05 ///
 
 # shellcheck disable=SC2009 # REASON: pgrep is not POSIX
 
@@ -188,14 +188,14 @@ printf '\n%s\n\n' "--> GENERATING CDN-LINKS FOR: '$gname_hr' PLEASE WAIT.."
 ## get current game version
 version_basegame="$(grep -m1 '"version":' "$game_id_json"| cut -d '"' -f 4)"
 
-## write game name & game version to "${cdn_links_dir}/${game_link}.txt"
-[ -f "${cdn_links_dir}/${game_link}.txt" ] && rm -f "${cdn_links_dir}/${game_link}.txt"
-printf '%s\n\n' "// GAME: $gname_hr // VERSION: $version_basegame // PLATFORM: $platform //"| tee -a "${cdn_links_dir}/${game_link}.txt"
+## write game name & game version to "${cdn_links_dir}/${game_link}~${current_time}.txt"
+[ -f "${cdn_links_dir}/${game_link}~${current_time}.txt" ] && rm -f "${cdn_links_dir}/${game_link}~${current_time}.txt"
+printf '%s\n\n' "// GAME: $gname_hr // VERSION: $version_basegame // PLATFORM: $platform //"| tee -a "${cdn_links_dir}/${game_link}~${current_time}.txt"
 
 #### get the cdn links for the individual parts ####
 
 ### basegame ###
-printf '\n%s\n%s\n%s\n\n' "============" " BASE GAME:" "============"| tee -a "${cdn_links_dir}/${game_link}.txt"
+printf '\n%s\n%s\n%s\n\n' "============" " BASE GAME:" "============"| tee -a "${cdn_links_dir}/${game_link}~${current_time}.txt"
 for part in $gparts_basegame; do
 get_part_name
 get_part_size
@@ -204,7 +204,7 @@ done
 
 ### dlc ###
 [ -n "$gparts_dlc" ] && {
-printf '\n\n%s\n%s\n%s\n\n' "======" " DLC:" "======"| tee -a "${cdn_links_dir}/${game_link}.txt"
+printf '\n\n%s\n%s\n%s\n\n' "======" " DLC:" "======"| tee -a "${cdn_links_dir}/${game_link}~${current_time}.txt"
 for part in $gparts_dlc; do
 get_part_name
 get_part_size
@@ -214,7 +214,7 @@ done
 
 ### patches ###
 [ -n "$gparts_patches" ] && {
-printf '\n\n%s\n%s\n%s\n\n' "==========" " PATCHES:" "=========="| tee -a "${cdn_links_dir}/${game_link}.txt"
+printf '\n\n%s\n%s\n%s\n\n' "==========" " PATCHES:" "=========="| tee -a "${cdn_links_dir}/${game_link}~${current_time}.txt"
 for part in $gparts_patches; do
 get_part_name
 get_part_size
@@ -251,32 +251,38 @@ grep 'location'| grep -o 'https.*')"
 refresh_gog_cookie
 
 ## write $part_name, $part_size and $part_link to '${magog_base}/cdn_links'
-printf '%s\n%s\n\n' "== $part_name // $part_size ==" "$part_link"| tee -a "${cdn_links_dir}/${game_link}.txt"
+printf '%s\n%s\n\n' "== $part_name // $part_size ==" "$part_link"| tee -a "${cdn_links_dir}/${game_link}~${current_time}.txt"
 }
 
 
 display_cdn_links () {
-remove_unicode_codepoints "${cdn_links_dir}/${game_link}.txt"
+remove_unicode_codepoints "${cdn_links_dir}/${game_link}~${current_time}.txt"
 clear_screen
-printf '%s\n' "LINKS ARE VALID FOR 24H!" >> "${cdn_links_dir}/${game_link}.txt"
+printf '%s\n' "LINKS ARE VALID FOR 24H!" >> "${cdn_links_dir}/${game_link}~${current_time}.txt"
 ## display the result
-cat "${cdn_links_dir}/${game_link}.txt"
+cat "${cdn_links_dir}/${game_link}~${current_time}.txt"
 exit 0
+}
+
+
+get_current_time () {
+## get current time in seconds since epoch
+current_time="$(date '+%s')"
 }
 
 
 check_for_stale_cdn_links () {
 ## due to cdn-links only being valid for 24h,
-## remove any that are older than 86400 seconds.
-## get current time in seconds since epoch
-current_time="$(date '+%s')"
+## and remove any that are older than 86400 seconds.
+get_current_time
 
 ## get all filenames in $cdn_links_dir
 cdn_links="$(find "${cdn_links_dir}" -type f| tr '\n' ' ')"
 
 for file in $cdn_links; do
 ## get time of file creation in seconds since epoch
-file_creation_time="$(stat --printf='%W' "$file")"
+##file_creation_time="$(stat --printf='%W' "$file")"
+file_creation_time="$(printf '%s\n' "$file"| cut -d '~' -f 2| sed 's#.txt##')"
 
 ## calculate the difference between $current_time and $file_creation_time
 elapsed_time="$((current_time - file_creation_time))"
@@ -293,28 +299,36 @@ game_count_lines="$(wc -l "$index"| cut -d ' ' -f 1)"
 }
 
 
+get_gamecount () {
+[ -n "$add_gog_account" ] && game_count="$(printf '%s\n' "$udat"| sed -n '3 p'| cut -d ':' -f 2)"
+[ -n "$get_data_from_accounts_txt" ] && \
+game_count="$(curl -sb "$cookie" "https://menu.gog.com/v1/account/stats"| tr ',' '\n'|grep -o '{"games":.*'| cut -d ':' -f 2)"
+add_gog_account=""; get_data_from_accounts_txt=""
+
+## make sure that '$index' exists, and count the lines in $index
+[ ! -f "$index" ] && touch "$index"
+count_index_txt_lines
+
+## if $game_count contains: '{"message":"Unable to authenticate."}', abort.
+printf '%s\n' "$game_count"| grep -q '{"message":"Unable to authenticate."}' && \
+printf '\n%s\n\n' "--> ERROR: CAN'T GET NUMBER OF GAMES FOR: $user" && remove_gog_account
+}
+
+
 get_game_id_list () {
 ## init vars
-game_count=""; game_count_lines=""; current_game_count="1"
-get_gamecount
+game_count_lines=""; current_game_count="1"
 
 ## obtain all title id's and convert it into a newline seperated list
 curl -sb "$cookie" -c "${magog_base}/.new_gog-cookie.txt" 'https://menu.gog.com/v1/account/licences' --compressed| \
 tr '[]",' ' '| tr -s ' '| tr ' ' '\n'| sed '/^$/ d' > "$game_id_list"
 refresh_gog_cookie
-
-## if $game_id_list contains: '{"message":"Unable to authenticate."}', abort.
-grep -q '{"message":"Unable to authenticate."}' "$game_id_list" && remove_gog_account
-
-## make sure that '"$index"' exists
-[ ! -f "$index" ] && touch "$index"
-count_index_txt_lines
 }
 
 
 gog_library_indexer () {
 synced="--> GAMES FOR $user HAVE BEEN SYNCED."
-get_game_id_list
+get_gamecount
 
 ## check if there is any .bak file we can restore, to avoid indexing from scratch.
 ## (see remove_gog_account for more info on .bak files).
@@ -322,6 +336,7 @@ get_game_id_list
 
 ## if $game_count_lines and $game_count are equal, there is no need to sync and we return, otherwise continue.
 [ "$game_count" = "$game_count_lines" ] && { clear_screen; printf '%s\n' "$synced"; return 0 ;}
+get_game_id_list
 
 ## if $game is already set, create $game_bak
 ## NOTE: this only happens if the user chooses a game via args
@@ -422,7 +437,6 @@ printf '\n%s\n\n' "--> CONNECT TO THE INTERNET AND TRY AGAIN." && exit 1
 clear_screen
 }
 
-###### AUTH STUFF (cookies, account management, etc) ######
 
 refresh_gog_cookie () {
 ## make sure that '.new_gog-cookie.txt' becomes our current cookie
@@ -630,21 +644,6 @@ printf '%s\n' "${uid}~${user}" >> "${magog_accounts_txt}"
 printf '\n%s\n\n' "--> GOG ACCOUNT '$user' SUCCESSFULLY ADDED."
 gog_library_indexer
 return 0
-}
-
-
-get_gamecount () {
-[ -n "$add_gog_account" ] && game_count="$(printf '%s\n' "$udat"| sed -n '3 p'| cut -d ':' -f 2)"
-[ -n "$get_data_from_accounts_txt" ] && \
-game_count="$(curl -sb "$cookie" "https://menu.gog.com/v1/account/stats"| tr ',' '\n'|grep -o '{"games":.*'| cut -d ':' -f 2)"
-add_gog_account=""; get_data_from_accounts_txt=""
-
-## if $game_count is 0 or unset, then you either don't have any games on said account, or magog can't determine how many
-## magog  will tell the user, remove the gog account, and exit.
-[ "$game_count" = "0" ] || [ -z "$game_count" ] && {
-printf '\n%s\n\n' "--> ERROR: CAN'T GET NUMBER OF GAMES FOR: $user"
-remove_gog_account
-}
 }
 
 
