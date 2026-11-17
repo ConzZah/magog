@@ -1,6 +1,6 @@
 #!/usr/bin/env sh
 
-### /// magog.sh // ConzZah // 2026-11-17 02:44 ///
+### /// magog.sh // ConzZah // 2026-11-17 04:49 ///
 
 # shellcheck disable=SC2009 # REASON: pgrep is not POSIX
 
@@ -318,12 +318,10 @@ get_game_id_list
 
 ## check if there is any .bak file we can restore, to avoid indexing from scratch.
 ## (see remove_gog_account for more info on .bak files).
-[ -f "$index.bak" ] && \
-mv "$index.bak" "$index" 
-clear_screen; printf '%s\n' "--> SYNCING ${user}'s LIBRARY, PLEASE WAIT.."; sleep 0.7; clear_screen
+[ -f "$index.bak" ] && mv "$index.bak" "$index" 
 
 ## if $game_count_lines and $game_count are equal, there is no need to sync and we return, otherwise continue.
-[ "$game_count" = "$game_count_lines" ] && clear_screen && printf '%s\n' "$synced" && sleep 0.7 && clear_screen && return 0
+[ "$game_count" = "$game_count_lines" ] && { clear_screen; printf '%s\n' "$synced"; return 0 ;}
 
 ## if $game is already set, create $game_bak
 ## NOTE: this only happens if the user chooses a game via args
@@ -378,7 +376,7 @@ done < "$game_id_list"
 ## remove any games from index.txt that the user might have refunded
 remove_refunded_games
 remove_unicode_codepoints "$index"
-printf '\n%s\n\n' "$synced"; sleep 0.7; clear_screen
+printf '\n%s\n\n' "$synced"
 }
 
 
@@ -788,7 +786,7 @@ printf '%s\n' \
  | |\/| ||  _  | | __| | | | | __ 
  | |  | || | | | |_\ \ \_/ / |_\ \
  \_|  |_/\_| |_/\____/\___/ \____/
-  by ConzZah © 2026 // MIT-LICENSE
+ by ConzZah © 2026 // MIT-LICENSE
 
  [OPTIONS]
 
