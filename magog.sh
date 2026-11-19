@@ -1,6 +1,6 @@
 #!/usr/bin/env sh
 
-### /// magog.sh // ConzZah // 2026-11-19 14:04 ///
+### /// magog.sh // ConzZah // 2026-11-19 20:00 ///
 
 # shellcheck disable=SC2009 # REASON: pgrep is not POSIX
 
@@ -16,11 +16,12 @@ done
 
 ## set essential vars
 magog_base="$HOME/.magog"
+magog_tmp="${magog_base}/.tmp"
 cdn_links_dir="${magog_base}/cdn_links"
 magog_accounts_dir="${magog_base}/accounts"
 magog_accounts_txt="${magog_accounts_dir}/accounts.txt"
-game_id_list="${magog_base}/.tmp/game_id_list.txt"
-game_id_json="${magog_base}/.tmp/game_id.json"
+game_id_list="${magog_tmp}/game_id_list.txt"
+game_id_json="${magog_tmp}/game_id.json"
 
 ## standard language, platform-code and platform for games
 ## NOTE: $platc="1" Windows, $platc="2" Mac, $platc=3 Linux
@@ -30,8 +31,8 @@ lang="en"; platc="1"; platform="Windows"
 init () {
 clear_screen
 ## make sure '${magog_base}' and all of it's subdirs exist
-[ -d "${magog_base}/.tmp" ] && rm -fr "${magog_base}/.tmp"
-mkdir -p  "${magog_base}" "${magog_base}/.tmp" "$magog_accounts_dir" "$cdn_links_dir"
+[ -d "${magog_tmp}" ] && rm -fr "${magog_tmp}"
+mkdir -p  "${magog_base}" "${magog_tmp}" "$magog_accounts_dir" "$cdn_links_dir"
 check_for_stale_cdn_links
 
 ## check if we have an active internet connection and proceed to login_to_gog
@@ -238,10 +239,26 @@ part_name="$(grep -B8 "$part" "$game_id_json"| grep -o -m1 '"title":.*'| cut -d 
 }
 
 
+get_part_link () {
+## fetch cdn-link for the $part in question
+## NOTE: with every iteration, new cookies will be set, so we never need to worry about expiry,
+## UNLESS the user doesn't request a game within 9 months or terminates the session (via web in this case)
+sleep 0.4
+part_link="$(curl -sLIb "$cookie" -c "${magog_base}/.new_gog-cookie.txt" "https://www.gog.com/downloads/${part}"| \
+grep 'location'| grep -o 'https.*')"
+refresh_gog_cookie
+}
+
+
 get_part_size () {
+## init ${magog_tmp}/part_sizes
+touch "${magog_tmp}/part_sizes"
+
+## init vars
 part_size_mb=""
 part_size=""
-## gets filesize of the part in question (NOTE: ALL IN MB)
+
+## get filesize of the part in question (NOTE: ALL IN MB)
 part_size="$(grep -A4 "$part" "$game_id_json"| grep -o -m1 '"size":.*'| cut -d '"' -f 4)"
 
 ## if $part_size contains MB, fill $part_size_mb
@@ -269,27 +286,17 @@ done
 ## add $part_size_mb to $part_size_total_mb
 part_size_total_mb="$((part_size_mb + part_size_total_mb))"
 
-## add $part_type, $part_link and $part_size_mb to $part_size_array
-part_size_array_mb="$(printf '%s\n%s\n' "${part_size_array_mb}" "${part_type}~${part_size_mb}")"
+## write $part_type, $part_name and $part_size_mb to ${magog_tmp}/part_sizes
+printf '%s\n' "${part_type}~${part_name}~${part_size_mb}" >> "${magog_tmp}/part_sizes"
 
 ## write $part_name, $part_size and $part_link to '${magog_base}/cdn_links'
 printf '%s\n%s\n\n' "== $part_name // $part_size ==" "$part_link"| tee -a "${cdn_links_dir}/${game_link}.txt"
 }
 
 
-get_part_link () {
-## fetch cdn-link for the $part in question
-## NOTE: with every iteration, new cookies will be set, so we never need to worry about expiry,
-## UNLESS the user doesn't request a game within 9 months or terminates the session (via web in this case)
-sleep 0.4
-part_link="$(curl -sLIb "$cookie" -c "${magog_base}/.new_gog-cookie.txt" "https://www.gog.com/downloads/${part}"| \
-grep 'location'| grep -o 'https.*')"
-refresh_gog_cookie
-}
-
-
 display_cdn_links () {
 remove_unicode_codepoints "${cdn_links_dir}/${game_link}.txt"
+remove_unicode_codepoints "${magog_tmp}/part_sizes"
 clear_screen
 
 ## write $part_size_total_mb to ${cdn_links_dir}/${game_link}.txt
@@ -303,6 +310,12 @@ printf '%s\n%s\n' "LINKS ARE VALID FOR 24H!" "LINKS-CREATED-AT:${current_time}" 
 ## display the result
 grep -v "LINKS-CREATED-AT:${current_time}" "${cdn_links_dir}/${game_link}.txt"
 exit 0
+}
+
+
+### TODO ### 
+magog_downloader () {
+:
 }
 
 
@@ -441,15 +454,15 @@ remove_refunded_games () {
 ## if $game_count_lines is greater than $game_count, figure out what's no longer in $game_id_list.
 count_index_txt_lines
 [ "$game_count_lines" -gt "$game_count" ] && {
-cp "$index" "${magog_base}/.tmp/index-${uid}.txt"
+cp "$index" "${magog_tmp}/index-${uid}.txt"
 while read -r game_id; do
 game_id="$(printf '%s\n' "$game_id"| cut -d '~' -f 1)"
 ! grep -q "$game_id" "$game_id_list" && {
 refunded_game_line="$(grep -n -m1 "$game_id" "$index"| cut -d ':' -f 1)"
 sed -i "$refunded_game_line d" "$index"
 }
-done < "${magog_base}/.tmp/index-${uid}.txt"
-rm -f "${magog_base}/.tmp/index-${uid}.txt"
+done < "${magog_tmp}/index-${uid}.txt"
+rm -f "${magog_tmp}/index-${uid}.txt"
 }
 }
 
@@ -458,8 +471,8 @@ remove_unicode_codepoints () {
 ## remove (the most common) unicode codepoints
 sed -i -e 's#u0026##g' -e 's#u0027##g' -e 's#u2013##g' -e 's#u2014##g' -e 's#u2019##g' -e 's#u2122##g' -e 's#u00ae##g' -e 's#u003C##g' -e 's#u003E##g' -e 's#u014d##g' "$1"
 ## also make sure that there are no extra spaces
-tr -s ' ' < "$1" > "${magog_base}/.tmp/NoExtraSpacesPls"
-mv -f "${magog_base}/.tmp/NoExtraSpacesPls" "$1"
+tr -s ' ' < "$1" > "${magog_tmp}/NoExtraSpacesPls"
+mv -f "${magog_tmp}/NoExtraSpacesPls" "$1"
 }
 
 
