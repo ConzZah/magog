@@ -1,6 +1,6 @@
 #!/usr/bin/env sh
 
-### /// magog.sh // ConzZah // 2026-11-17 19:05 ///
+### /// magog.sh // ConzZah // 2026-11-19 10:12 ///
 
 # shellcheck disable=SC2009 # REASON: pgrep is not POSIX
 
@@ -188,14 +188,14 @@ printf '\n%s\n\n' "--> GENERATING CDN-LINKS FOR: '$gname_hr' PLEASE WAIT.."
 ## get current game version
 version_basegame="$(grep -m1 '"version":' "$game_id_json"| cut -d '"' -f 4)"
 
-## write game name & game version to "${cdn_links_dir}/${game_link}~${current_time}.txt"
-[ -f "${cdn_links_dir}/${game_link}~${current_time}.txt" ] && rm -f "${cdn_links_dir}/${game_link}~${current_time}.txt"
-printf '%s\n\n' "// GAME: $gname_hr // VERSION: $version_basegame // PLATFORM: $platform //"| tee -a "${cdn_links_dir}/${game_link}~${current_time}.txt"
+## write game name & game version to "${cdn_links_dir}/${game_link}.txt"
+[ -f "${cdn_links_dir}/${game_link}.txt" ] && rm -f "${cdn_links_dir}/${game_link}.txt"
+printf '%s\n\n' "// GAME: $gname_hr // VERSION: $version_basegame // PLATFORM: $platform //"| tee -a "${cdn_links_dir}/${game_link}.txt"
 
 #### get the cdn links for the individual parts ####
 
 ### basegame ###
-printf '\n%s\n%s\n%s\n\n' "============" " BASE GAME:" "============"| tee -a "${cdn_links_dir}/${game_link}~${current_time}.txt"
+printf '\n%s\n%s\n%s\n\n' "============" " BASE GAME:" "============"| tee -a "${cdn_links_dir}/${game_link}.txt"
 for part in $gparts_basegame; do
 get_part_name
 get_part_size
@@ -204,7 +204,7 @@ done
 
 ### dlc ###
 [ -n "$gparts_dlc" ] && {
-printf '\n\n%s\n%s\n%s\n\n' "======" " DLC:" "======"| tee -a "${cdn_links_dir}/${game_link}~${current_time}.txt"
+printf '\n%s\n%s\n%s\n\n' "======" " DLC:" "======"| tee -a "${cdn_links_dir}/${game_link}.txt"
 for part in $gparts_dlc; do
 get_part_name
 get_part_size
@@ -214,7 +214,7 @@ done
 
 ### patches ###
 [ -n "$gparts_patches" ] && {
-printf '\n\n%s\n%s\n%s\n\n' "==========" " PATCHES:" "=========="| tee -a "${cdn_links_dir}/${game_link}~${current_time}.txt"
+printf '\n%s\n%s\n%s\n\n' "==========" " PATCHES:" "=========="| tee -a "${cdn_links_dir}/${game_link}.txt"
 for part in $gparts_patches; do
 get_part_name
 get_part_size
@@ -251,16 +251,20 @@ grep 'location'| grep -o 'https.*')"
 refresh_gog_cookie
 
 ## write $part_name, $part_size and $part_link to '${magog_base}/cdn_links'
-printf '%s\n%s\n\n' "== $part_name // $part_size ==" "$part_link"| tee -a "${cdn_links_dir}/${game_link}~${current_time}.txt"
+printf '%s\n%s\n\n' "== $part_name // $part_size ==" "$part_link"| tee -a "${cdn_links_dir}/${game_link}.txt"
 }
 
 
 display_cdn_links () {
-remove_unicode_codepoints "${cdn_links_dir}/${game_link}~${current_time}.txt"
+remove_unicode_codepoints "${cdn_links_dir}/${game_link}.txt"
 clear_screen
-printf '%s\n' "LINKS ARE VALID FOR 24H!" >> "${cdn_links_dir}/${game_link}~${current_time}.txt"
+
+## write ${current_time} to ${cdn_links_dir}/${game_link}.txt
+get_current_time
+printf '%s\n%s\n' "LINKS ARE VALID FOR 24H!" "LINKS-CREATED-AT:${current_time}"  >> "${cdn_links_dir}/${game_link}.txt"
+
 ## display the result
-cat "${cdn_links_dir}/${game_link}~${current_time}.txt"
+grep -v "LINKS-CREATED-AT:${current_time}" "${cdn_links_dir}/${game_link}.txt"
 exit 0
 }
 
@@ -281,8 +285,7 @@ cdn_links="$(find "${cdn_links_dir}" -type f| tr '\n' ' ')"
 
 for file in $cdn_links; do
 ## get time of file creation in seconds since epoch
-##file_creation_time="$(stat --printf='%W' "$file")"
-file_creation_time="$(printf '%s\n' "$file"| cut -d '~' -f 2| sed 's#.txt##')"
+file_creation_time="$(grep 'LINKS-CREATED-AT:' "$file"| cut -d ':' -f 2)"
 
 ## calculate the difference between $current_time and $file_creation_time
 elapsed_time="$((current_time - file_creation_time))"
