@@ -1,6 +1,6 @@
 #!/usr/bin/env sh
 
-### /// magog.sh // ConzZah // 2026-11-19 10:12 ///
+### /// magog.sh // ConzZah // 2026-11-19 14:04 ///
 
 # shellcheck disable=SC2009 # REASON: pgrep is not POSIX
 
@@ -56,7 +56,7 @@ check_if_game_exists_in_index () {
 ! game="$(eval "grep -H -i \"$game\" $index")" && \
 printf '\n%s\n\n' "--> ERROR: GAME: '$query' IS NOT IN INDEX" && exit 1
 ## if $pick_first_game is nonzero, print only the first line in $game.
-[ -n "$pick_first_game" ] && game="$(printf '%s\n' "$game"| sed -n '1 p')"
+[ -n "$pick_first_game" ] && game="$(printf '%s\n' "$game"| sed -n '$ p')"
 
 return 0
 }
@@ -196,29 +196,32 @@ printf '%s\n\n' "// GAME: $gname_hr // VERSION: $version_basegame // PLATFORM: $
 
 ### basegame ###
 printf '\n%s\n%s\n%s\n\n' "============" " BASE GAME:" "============"| tee -a "${cdn_links_dir}/${game_link}.txt"
+part_type="base"
 for part in $gparts_basegame; do
 get_part_name
-get_part_size
 get_part_link
+get_part_size
 done
 
 ### dlc ###
 [ -n "$gparts_dlc" ] && {
+part_type="dlc"
 printf '\n%s\n%s\n%s\n\n' "======" " DLC:" "======"| tee -a "${cdn_links_dir}/${game_link}.txt"
 for part in $gparts_dlc; do
 get_part_name
-get_part_size
 get_part_link
+get_part_size
 done
 }
 
 ### patches ###
 [ -n "$gparts_patches" ] && {
+part_type="patches"
 printf '\n%s\n%s\n%s\n\n' "==========" " PATCHES:" "=========="| tee -a "${cdn_links_dir}/${game_link}.txt"
 for part in $gparts_patches; do
 get_part_name
-get_part_size
 get_part_link
+get_part_size
 done
 }
 }
@@ -236,8 +239,41 @@ part_name="$(grep -B8 "$part" "$game_id_json"| grep -o -m1 '"title":.*'| cut -d 
 
 
 get_part_size () {
-## gets filesize of the part in question
+part_size_mb=""
+part_size=""
+## gets filesize of the part in question (NOTE: ALL IN MB)
 part_size="$(grep -A4 "$part" "$game_id_json"| grep -o -m1 '"size":.*'| cut -d '"' -f 4)"
+
+## if $part_size contains MB, fill $part_size_mb
+## (this means we won't even enter the loop below)
+printf '%s\n' "$part_size"| grep -q 'MB' && \
+part_size_mb="$(printf '%s\n' "$part_size"| sed 's# MB##')"
+
+## convert GB to MB when needed, so we can determine the total filesize of all parts.
+until [ -n "$part_size_mb" ]; do
+
+## if we don't have a decimal point at all, add three zeros at the end.
+! printf '%s\n' "$part_size"| grep -q "\." && \
+part_size_mb="$(printf '%s\n' "$part_size"| sed -e 's# GB##' -e 's#$#000#')" && break
+
+## if we have 0 in front, followed by a decimal point, 
+## get rid of them and add two zeros at the end.
+printf '%s\n' "$part_size"| grep -q "^0\." && \
+part_size_mb="$(printf '%s\n' "$part_size"| sed -e 's# GB##' -e 's#$#00#' -e 's#^0.##')" && break
+
+## if we have a decimal point anywhere but(t) in the front, nuke it, and add two zeros at the end.
+printf '%s\n' "$part_size"| grep -q '.*\.' && \
+part_size_mb="$(printf '%s\n' "$part_size"| sed -e 's# GB##' -e 's#$#00#' -e 's#\.##')" && break
+done
+
+## add $part_size_mb to $part_size_total_mb
+part_size_total_mb="$((part_size_mb + part_size_total_mb))"
+
+## add $part_type, $part_link and $part_size_mb to $part_size_array
+part_size_array_mb="$(printf '%s\n%s\n' "${part_size_array_mb}" "${part_type}~${part_size_mb}")"
+
+## write $part_name, $part_size and $part_link to '${magog_base}/cdn_links'
+printf '%s\n%s\n\n' "== $part_name // $part_size ==" "$part_link"| tee -a "${cdn_links_dir}/${game_link}.txt"
 }
 
 
@@ -249,15 +285,16 @@ sleep 0.4
 part_link="$(curl -sLIb "$cookie" -c "${magog_base}/.new_gog-cookie.txt" "https://www.gog.com/downloads/${part}"| \
 grep 'location'| grep -o 'https.*')"
 refresh_gog_cookie
-
-## write $part_name, $part_size and $part_link to '${magog_base}/cdn_links'
-printf '%s\n%s\n\n' "== $part_name // $part_size ==" "$part_link"| tee -a "${cdn_links_dir}/${game_link}.txt"
 }
 
 
 display_cdn_links () {
 remove_unicode_codepoints "${cdn_links_dir}/${game_link}.txt"
 clear_screen
+
+## write $part_size_total_mb to ${cdn_links_dir}/${game_link}.txt
+## (so the user knows how much space they need)
+printf '%s\n' "TOTAL SIZE OF ALL PARTS: $part_size_total_mb MB" >> "${cdn_links_dir}/${game_link}.txt"
 
 ## write ${current_time} to ${cdn_links_dir}/${game_link}.txt
 get_current_time
