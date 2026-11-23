@@ -1,11 +1,11 @@
 #!/usr/bin/env sh
 
-### /// magog.sh // ConzZah // 2026-11-19 20:00 ///
+### /// magog.sh // ConzZah // 2026-11-23 16:03 ///
 
 # shellcheck disable=SC2009 # REASON: pgrep is not POSIX
 
 ## depcheck
-deps="sqlite3 curl grep sed cut fzf tr wc"
+deps="sqlite3 curl wget grep sed cut fzf tr wc"
 missing_deps=""
 for dep in $deps; do
 ! command -v "$dep" >/dev/null && missing_deps="$dep $missing_deps"
@@ -13,6 +13,10 @@ done
 
 ## if $missing_deps is empty, tell the user which are missing & exit.
 [ -n "$missing_deps" ] && printf '\n%s\n\n' "--> MISSING DEPS: $missing_deps" && exit 1
+
+## standard language, platform-code and platform for games
+## NOTE: $platc="1" Windows, $platc="2" Mac, $platc=3 Linux
+lang="en"; platc="1"; platform="Windows"
 
 ## set essential vars
 magog_base="$HOME/.magog"
@@ -22,17 +26,24 @@ magog_accounts_dir="${magog_base}/accounts"
 magog_accounts_txt="${magog_accounts_dir}/accounts.txt"
 game_id_list="${magog_tmp}/game_id_list.txt"
 game_id_json="${magog_tmp}/game_id.json"
-
-## standard language, platform-code and platform for games
-## NOTE: $platc="1" Windows, $platc="2" Mac, $platc=3 Linux
-lang="en"; platc="1"; platform="Windows"
+dl_path="${HOME}/Downloads"
+[ -f "${magog_tmp}/parts2dl" ] && rm -f "${magog_tmp}/parts2dl"
+touch "${magog_tmp}/parts2dl"
 
 
 init () {
 clear_screen
+## if $custom_dlpath is set, overwrite $dlpath
+[ -n "$custom_dlpath" ] && dlpath="$custom_dlpath"
+
 ## make sure '${magog_base}' and all of it's subdirs exist
 [ -d "${magog_tmp}" ] && rm -fr "${magog_tmp}"
-mkdir -p  "${magog_base}" "${magog_tmp}" "$magog_accounts_dir" "$cdn_links_dir"
+mkdir -p  "${magog_base}" "${magog_tmp}" "${magog_accounts_dir}" "${cdn_links_dir}" "${dl_path}"
+
+## if $choose_game_via_args is set, continue from there
+[ -n "$choose_game_via_args" ] && choose_game_via_args
+
+## check if there are cdn links older than 12h
 check_for_stale_cdn_links
 
 ## check if we have an active internet connection and proceed to login_to_gog
@@ -47,7 +58,7 @@ login_to_gog
 choose_game_via_fzf
 
 ## get the cdn links and display them
-get_gog_links; display_cdn_links
+get_gog_links
 }
 
 
@@ -57,7 +68,7 @@ check_if_game_exists_in_index () {
 ! game="$(eval "grep -H -i \"$game\" $index")" && \
 printf '\n%s\n\n' "--> ERROR: GAME: '$query' IS NOT IN INDEX" && exit 1
 ## if $pick_first_game is nonzero, print only the first line in $game.
-[ -n "$pick_first_game" ] && game="$(printf '%s\n' "$game"| sed -n '$ p')"
+[ -n "$pick_first_game" ] && game="$(printf '%s\n' "$game"| sed -n '1 p')"
 
 return 0
 }
@@ -162,6 +173,12 @@ gname_hr="$(printf '%s\n' "$game"| cut -d '~' -f 2)"
 ## get the $game_link (so we can tell dlc from basegame)
 game_link="$(printf '%s\n' "$game"| cut -d '~' -f 3)"
 
+## if ${cdn_links_dir}/${game_link}.txt exists, 
+## then we already have generated links for that game in the past 12 hours, and set $link_already_generated.
+## (this makes magog faster, since we don't have to fetch the parts again).
+## otherwise, write game name & game version to "${cdn_links_dir}/${game_link}.txt"
+[ -f "${cdn_links_dir}/${game_link}.txt" ] && link_already_generated="1"
+
 ## get game details
 get_game_id_json
 
@@ -180,6 +197,7 @@ gparts_basegame="$(printf '%s\n' "$part_list_complete"| grep "${game_link}/${lan
 gparts_dlc="$(printf '%s\n' "$part_list_complete"| grep -v "${game_link}/${lang}${platc}installer.*"| grep -o ".*${lang}${platc}installer.*")"
 gparts_patches="$(printf '%s\n' "$part_list_complete"| grep -o ".*${lang}${platc}patch.*")"
 
+
 ## if $gparts_basegame is empty, then the game is not available for the selected platform
 [ -z "$gparts_basegame" ] && printf '\n%s\n\n' "--> ERROR: $gname_hr IS NOT AVAILABLE FOR: $platform" && exit 1
 
@@ -189,42 +207,51 @@ printf '\n%s\n\n' "--> GENERATING CDN-LINKS FOR: '$gname_hr' PLEASE WAIT.."
 ## get current game version
 version_basegame="$(grep -m1 '"version":' "$game_id_json"| cut -d '"' -f 4)"
 
-## write game name & game version to "${cdn_links_dir}/${game_link}.txt"
-[ -f "${cdn_links_dir}/${game_link}.txt" ] && rm -f "${cdn_links_dir}/${game_link}.txt"
-printf '%s\n\n' "// GAME: $gname_hr // VERSION: $version_basegame // PLATFORM: $platform //"| tee -a "${cdn_links_dir}/${game_link}.txt"
+[ -z "$link_already_generated" ] && printf '%s\n\n' "// GAME: $gname_hr // VERSION: $version_basegame // PLATFORM: $platform //"| tee -a "${cdn_links_dir}/${game_link}.txt"
 
 #### get the cdn links for the individual parts ####
 
 ### basegame ###
-printf '\n%s\n%s\n%s\n\n' "============" " BASE GAME:" "============"| tee -a "${cdn_links_dir}/${game_link}.txt"
-part_type="base"
+part_type="base_game"
 for part in $gparts_basegame; do
 get_part_name
-get_part_link
+[ -z "$link_already_generated" ] && get_part_link
 get_part_size
+write_cdn_links
 done
 
 ### dlc ###
 [ -n "$gparts_dlc" ] && {
 part_type="dlc"
-printf '\n%s\n%s\n%s\n\n' "======" " DLC:" "======"| tee -a "${cdn_links_dir}/${game_link}.txt"
 for part in $gparts_dlc; do
 get_part_name
-get_part_link
+[ -z "$link_already_generated" ] && get_part_link
 get_part_size
+write_cdn_links
 done
 }
 
 ### patches ###
 [ -n "$gparts_patches" ] && {
 part_type="patches"
-printf '\n%s\n%s\n%s\n\n' "==========" " PATCHES:" "=========="| tee -a "${cdn_links_dir}/${game_link}.txt"
 for part in $gparts_patches; do
 get_part_name
-get_part_link
+[ -z "$link_already_generated" ] && get_part_link
 get_part_size
+write_cdn_links
 done
 }
+
+## set $postprocess_cdn_links and $link_already_generated,
+## to signal write_cdn_links that get_gog_links already ran.
+postprocess_cdn_links="1"
+link_already_generated="1"
+write_cdn_links
+
+## if $nodl is zero, move on to the downloader,
+## else display the links and exit
+[  -z "$nodl" ] && magog_downloader
+cat "${cdn_links_dir}/${game_link}.txt" && exit
 }
 
 
@@ -251,9 +278,6 @@ refresh_gog_cookie
 
 
 get_part_size () {
-## init ${magog_tmp}/part_sizes
-touch "${magog_tmp}/part_sizes"
-
 ## init vars
 part_size_mb=""
 part_size=""
@@ -286,36 +310,77 @@ done
 ## add $part_size_mb to $part_size_total_mb
 part_size_total_mb="$((part_size_mb + part_size_total_mb))"
 
-## write $part_type, $part_name and $part_size_mb to ${magog_tmp}/part_sizes
-printf '%s\n' "${part_type}~${part_name}~${part_size_mb}" >> "${magog_tmp}/part_sizes"
-
-## write $part_name, $part_size and $part_link to '${magog_base}/cdn_links'
-printf '%s\n%s\n\n' "== $part_name // $part_size ==" "$part_link"| tee -a "${cdn_links_dir}/${game_link}.txt"
+## write $part_type, $part_size_mb and $part_name to ${magog_tmp}/parts2dl (in that order)
+printf '%s\n' "${part_type}~${part_size_mb}~${part_name}" >> "${magog_tmp}/parts2dl"
 }
 
 
-display_cdn_links () {
+write_cdn_links () {
+## write $part_name, $part_size and $part_link to '${cdn_links_dir}/${game_link}.txt'
+[ -z "$link_already_generated" ] && {
+printf '\n%s\n%s\n%s\n\n' "============" " $part_type" "============"| tee -a "${cdn_links_dir}/${game_link}.txt"
+printf '%s\n%s\n\n' "== $part_name // $part_size ==" "$part_link"| tee -a "${cdn_links_dir}/${game_link}.txt"
+}
+
+## NOTE: $postprocess_cdn_links will be set when get_gog_links finished.
+[ -n "$postprocess_cdn_links" ] && {
 remove_unicode_codepoints "${cdn_links_dir}/${game_link}.txt"
-remove_unicode_codepoints "${magog_tmp}/part_sizes"
-clear_screen
+remove_unicode_codepoints "${magog_tmp}/parts2dl"
 
 ## write $part_size_total_mb to ${cdn_links_dir}/${game_link}.txt
 ## (so the user knows how much space they need)
+! grep -q 'TOTAL SIZE OF ALL PARTS.*' "${cdn_links_dir}/${game_link}.txt" && \
 printf '%s\n' "TOTAL SIZE OF ALL PARTS: $part_size_total_mb MB" >> "${cdn_links_dir}/${game_link}.txt"
 
 ## write ${current_time} to ${cdn_links_dir}/${game_link}.txt
 get_current_time
-printf '%s\n%s\n' "LINKS ARE VALID FOR 24H!" "LINKS-CREATED-AT:${current_time}"  >> "${cdn_links_dir}/${game_link}.txt"
-
-## display the result
-grep -v "LINKS-CREATED-AT:${current_time}" "${cdn_links_dir}/${game_link}.txt"
-exit 0
+! grep -q 'LINKS ARE VALID FOR.*' "${cdn_links_dir}/${game_link}.txt" && \
+printf '%s\n%s\n' "LINKS ARE VALID FOR 12H!" "LINKS-CREATED-AT:${current_time}"  >> "${cdn_links_dir}/${game_link}.txt"
+}
 }
 
 
-### TODO ### 
 magog_downloader () {
-:
+part_types_to_download=""
+## if $part_types has more than 1 line, ask the user which part-types they want
+## (otherwise jump straight to downloading)
+part_types="$(cut -d '~' -f 1 < "${magog_tmp}/parts2dl"| sort | uniq)"
+[ "$(printf '%s\n' "$part_types"| wc -l)" -gt "1" ] && {
+
+## present the user with options
+part_types_to_download="$(printf '%s\n%s\n%s\n' "DOWNLOAD-ALL" "$part_types" "EXIT MAGOG"| \
+fzf --multi --header "--> CHOOSE WHAT TO DOWNLOAD (use TAB to select multiple)")"
+
+## if $part_types_to_download is still empty, then the user ctrl+c'ed.
+[ -z "$part_types_to_download" ] && printf '\n%s\n\n' "--> NO OPTION CHOSEN." && exit 1
+
+## if 'EXIT MAGOG' was chosen, end it all.
+printf '%s\n' "$part_types_to_download"| grep -q 'EXIT MAGOG' && \
+printf '\n%s\n\n' "--> HAVE A NICE DAY :D" && exit 0
+
+## if 'DOWNLOAD-ALL' was chosen, download everything.
+printf '%s\n' "$part_types_to_download"| grep -q 'DOWNLOAD-ALL'
+
+## if the user chose anything else,
+## sort out the part-types the user didn't want to download
+part_types_to_download="$(printf '%s\n' "$part_types_to_download"| tr '\n' '\|'| sed 's#|$##')"
+grep -E "$part_types_to_download" "${magog_tmp}/parts2dl" > "${magog_tmp}/sort_parts2dl"
+mv "${magog_tmp}/sort_parts2dl" "${magog_tmp}/parts2dl"
+}
+
+## prepare to download
+while read -r part; do
+part_name="$(printf '%s' "$part"| cut -d '~' -f 3)"
+
+## obtain the url based on the $part_name (and get rid of '\r' (carriage return))
+part="$(grep -A1 -m1 "== ${part_name}" "${cdn_links_dir}/${game_link}.txt"| grep -o 'https://.*'| tr -d '\r')"
+
+## download
+cd "${dlpath}" || exit 1
+wget -nc "$part"
+done < "${magog_tmp}/parts2dl"
+printf '\n%s\n\n' "--> HAVE A NICE DAY :D"
+exit
 }
 
 
@@ -326,8 +391,8 @@ current_time="$(date '+%s')"
 
 
 check_for_stale_cdn_links () {
-## due to cdn-links only being valid for 24h,
-## and remove any that are older than 86400 seconds.
+## due to cdn-links only being valid for 12h,
+## and remove any that are older than 43200 seconds.
 get_current_time
 
 ## get all filenames in $cdn_links_dir
@@ -335,13 +400,13 @@ cdn_links="$(find "${cdn_links_dir}" -type f| tr '\n' ' ')"
 
 for file in $cdn_links; do
 ## get time of file creation in seconds since epoch
-file_creation_time="$(grep 'LINKS-CREATED-AT:' "$file"| cut -d ':' -f 2)"
+file_creation_time="$(grep -m1 'LINKS-CREATED-AT:' "$file"| cut -d ':' -f 2)"
 
 ## calculate the difference between $current_time and $file_creation_time
 elapsed_time="$((current_time - file_creation_time))"
 
-## if elapsed_time is greater or equal to 86400, delete the file
-[ "$elapsed_time" -ge "86400" ] && rm -f "$file"
+## if elapsed_time is greater or equal to 43200, delete the file
+[ "$elapsed_time" -ge "43200" ] && rm -f "$file"
 done
 }
 
@@ -775,8 +840,8 @@ choose_gog_account_via_args "$uid"
 gog_library_indexer
 choose_game_from_all_indexes
 
-## get the cdn links and display them
-get_gog_links; display_cdn_links
+## get the cdn links
+get_gog_links
 }
 
 
@@ -794,6 +859,14 @@ case $1 in
 ## if -c was specified, get the gog cookie manually, instead of using firefox
 '-c') shift; [ -z "$1" ] && printf '\n%s\n\n' "--> ERROR: '-c' REQUIRES A GOG-AL COOKIE AS ARGUMENT." && exit 1 
 [ -n "$1" ] && manual_gog_cookie="$1"
+;;
+
+## don't download anything, just output the links and exit (see write_cdn_links for more info)
+'--nodl'|'-nodl') shift; nodl="1" ;;
+
+## choose a custom download path
+'--dlpath'|'-dlpath') shift; [ ! -d "$1" ] && printf '\n%s\n\n' "--> ERROR: ${1} ISN'T A VALID PATH." && exit 1
+custom_dlpath="$1"; shift
 ;;
 
 ## if --user was specified, check if the account exists in accounts.txt and choose it via arguments
@@ -825,7 +898,7 @@ choose_gog_account_via_args "$1"; shift
 '-g'|'-G'|'-game'|'--game') shift
 [ -z "$game" ] && {
 [ -z "$1" ] && printf '\n%s\n\n' "--> ERROR: '--game' REQUIRES AN ARGUMENT." && exit 1
-game="$1"; query="$1"; choose_game_via_args="1"; choose_game_via_args ;}
+game="$1"; query="$1"; choose_game_via_args="1"; shift ;}
 ;;
 
 ## magog help page
@@ -849,6 +922,8 @@ printf '%s\n' \
  -w / -m / -l  choose between windows / mac / linux versions 
  -1            always take the first match without prompting
  -c            provide gog-al cookie manually
+ --nodl        dont download anything, just output the links
+ --dlpath      provide a custom download path
  -h / --help   show this help page
 '
 exit 0
