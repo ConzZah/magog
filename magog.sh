@@ -1,6 +1,6 @@
 #!/usr/bin/env sh
 
-### /// magog.sh // ConzZah // 2026-11-23 16:03 ///
+### /// magog.sh // ConzZah // 2026-11-23 18:18 ///
 
 # shellcheck disable=SC2009 # REASON: pgrep is not POSIX
 
@@ -65,7 +65,7 @@ get_gog_links
 check_if_game_exists_in_index () {
 ## check index.txt for $game, and evac if it's not found
 ## (this will also get us the full index.txt line, we'll need it for $game_id later)
-! game="$(eval "grep -H -i \"$game\" $index")" && \
+! game="$(eval "grep -H -i \"$game~\" $index")" && \
 printf '\n%s\n\n' "--> ERROR: GAME: '$query' IS NOT IN INDEX" && exit 1
 ## if $pick_first_game is nonzero, print only the first line in $game.
 [ -n "$pick_first_game" ] && game="$(printf '%s\n' "$game"| sed -n '1 p')"
@@ -108,7 +108,7 @@ many="$(printf '%s\n' "$chosen_game"| wc -l)"
 fzf_header="--> YOU SEARCHED FOR: '$query' AND MAGOG FOUND $many RESULTS"
 
 ## ask user for a game and lock in
-ask_for_game && chosen_game="$(printf '%s\n' "$game"| grep -m1 "$chosen_game")"
+ask_for_game && chosen_game="$(printf '%s\n' "$game"| grep -m1 "${chosen_game}~")"
 return
 }
 
@@ -177,7 +177,14 @@ game_link="$(printf '%s\n' "$game"| cut -d '~' -f 3)"
 ## then we already have generated links for that game in the past 12 hours, and set $link_already_generated.
 ## (this makes magog faster, since we don't have to fetch the parts again).
 ## otherwise, write game name & game version to "${cdn_links_dir}/${game_link}.txt"
-[ -f "${cdn_links_dir}/${game_link}.txt" ] && link_already_generated="1"
+[ -f "${cdn_links_dir}/${game_link}.txt" ] && { 
+link_already_generated="1"
+
+## check if grep can find the timestamp. (this is a failsafe).
+## if it isn't there, that means we have an incomplete file. (because it gets set at the very end)
+! grep -q 'LINKS-CREATED-AT:.*' "${cdn_links_dir}/${game_link}.txt" && \
+rm -f "${cdn_links_dir}/${game_link}.txt" && link_already_generated=""
+}
 
 ## get game details
 get_game_id_json
@@ -207,12 +214,14 @@ printf '\n%s\n\n' "--> GENERATING CDN-LINKS FOR: '$gname_hr' PLEASE WAIT.."
 ## get current game version
 version_basegame="$(grep -m1 '"version":' "$game_id_json"| cut -d '"' -f 4)"
 
-[ -z "$link_already_generated" ] && printf '%s\n\n' "// GAME: $gname_hr // VERSION: $version_basegame // PLATFORM: $platform //"| tee -a "${cdn_links_dir}/${game_link}.txt"
+## write header
+[ -z "$link_already_generated" ] && \
+printf '%s\n\n' "// GAME: $gname_hr // VERSION: $version_basegame // PLATFORM: $platform //"| tee -a "${cdn_links_dir}/${game_link}.txt"
 
 #### get the cdn links for the individual parts ####
 
 ### basegame ###
-part_type="base_game"
+part_type="BASE-GAME"
 for part in $gparts_basegame; do
 get_part_name
 [ -z "$link_already_generated" ] && get_part_link
@@ -222,7 +231,7 @@ done
 
 ### dlc ###
 [ -n "$gparts_dlc" ] && {
-part_type="dlc"
+part_type="DLC"
 for part in $gparts_dlc; do
 get_part_name
 [ -z "$link_already_generated" ] && get_part_link
@@ -233,7 +242,7 @@ done
 
 ### patches ###
 [ -n "$gparts_patches" ] && {
-part_type="patches"
+part_type="PATCHES"
 for part in $gparts_patches; do
 get_part_name
 [ -z "$link_already_generated" ] && get_part_link
@@ -283,7 +292,7 @@ part_size_mb=""
 part_size=""
 
 ## get filesize of the part in question (NOTE: ALL IN MB)
-part_size="$(grep -A4 "$part" "$game_id_json"| grep -o -m1 '"size":.*'| cut -d '"' -f 4)"
+part_size="$(grep -A7 "$part" "$game_id_json"| grep -o -m1 '"size":.*'| cut -d '"' -f 4)"
 
 ## if $part_size contains MB, fill $part_size_mb
 ## (this means we won't even enter the loop below)
@@ -318,7 +327,13 @@ printf '%s\n' "${part_type}~${part_size_mb}~${part_name}" >> "${magog_tmp}/parts
 write_cdn_links () {
 ## write $part_name, $part_size and $part_link to '${cdn_links_dir}/${game_link}.txt'
 [ -z "$link_already_generated" ] && {
-printf '\n%s\n%s\n%s\n\n' "============" " $part_type" "============"| tee -a "${cdn_links_dir}/${game_link}.txt"
+part_type_header="$(printf '\n%s\n%s\n%s\n\n' "============" " $part_type" "============")"
+
+## only write $part_type_header if $part_type wasn't found
+! grep -q "$part_type" "${cdn_links_dir}/${game_link}.txt" && \
+printf '%s\n\n' "$part_type_header"| tee -a "${cdn_links_dir}/${game_link}.txt"
+
+## write $part_name, $part_size and $part_link
 printf '%s\n%s\n\n' "== $part_name // $part_size ==" "$part_link"| tee -a "${cdn_links_dir}/${game_link}.txt"
 }
 
